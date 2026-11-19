@@ -21,8 +21,18 @@ def search_paths():
 
 def load(path=None):
     explicit = path is not None
-    path = Path(path).expanduser() if explicit else next(
-        (candidate for candidate in search_paths() if candidate.exists()), None)
+    if explicit:
+        path = Path(path).expanduser()
+    else:
+        for candidate in search_paths():
+            try:
+                if candidate.exists():
+                    path = candidate
+                    break
+            except PermissionError:
+                # sudo/runuser may preserve another user's XDG paths. Continue
+                # with the system configuration if that directory is private.
+                continue
     if path is None:
         return {}, None
     path = path.resolve()
