@@ -2,6 +2,7 @@
 # 在 Debian 基线容器中验证安装包无需 Python，也无需运行中的 systemd。
 set -eu
 export DEBIAN_FRONTEND=noninteractive
+sh /work/scripts/debian11_sources.sh
 apt-get update -qq
 apt-get install -y --no-install-recommends /work/release/*.deb
 if command -v python3 >/dev/null; then

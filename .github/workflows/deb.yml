@@ -9,6 +9,7 @@ on:
       - requirements-build.txt
       - packaging/debian/**
       - scripts/test_deb_container.sh
+      - scripts/debian11_sources.sh
       - .github/workflows/deb.yml
   pull_request:
   workflow_dispatch:
@@ -35,6 +36,7 @@ jobs:
       - name: 在 Debian 11 基线环境构建独立可执行文件和安装包
         run: |
           python3 scripts/ci_run.py docker run --rm -v "$PWD:/work" -w /work python:3.12-bullseye sh -ec '
+            sh scripts/debian11_sources.sh
             apt-get update -qq
             apt-get install -y --no-install-recommends binutils iproute2 systemd
             python -m pip install -r requirements-build.txt
