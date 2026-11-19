@@ -1,0 +1,72 @@
+class NetworkMonitor < Formula
+  desc "Monitor network interface traffic with daily SQLite partitions"
+  homepage "https://github.com/Verdient/network-monitor"
+  version "@VERSION@"
+  license "0BSD"
+
+  depends_on macos: :sonoma
+
+  on_macos do
+    on_arm do
+      url "https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-arm64.tar.gz"
+      sha256 "@ARM64_SHA256@"
+    end
+    on_intel do
+      url "https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-x86_64.tar.gz"
+      sha256 "@X86_64_SHA256@"
+    end
+  end
+
+  def install
+    libexec.install "network-monitor"
+    (libexec/"homebrew-prefix").write "#{HOMEBREW_PREFIX}\n"
+    bin.write_exec_script libexec/"network-monitor"
+
+    (buildpath/"config.ini").write <<~EOS
+      # Long-running service settings. Edit and run: brew services restart network-monitor
+      [monitor]
+      # interface = en0, en1
+      database = #{var}/lib/network-monitor/network-monitor.db
+      interval = 1
+
+      [stats]
+      # timezone = Asia/Shanghai
+    EOS
+    (etc/"network-monitor").install "config.ini"
+    doc.install "README.md", "network-monitor.example.ini", "THIRD_PARTY_NOTICES.txt"
+  end
+
+  def post_install
+    (var/"lib/network-monitor").mkpath
+    (var/"log/network-monitor").mkpath
+  end
+
+  service do
+    run [opt_bin/"network-monitor", "--config", etc/"network-monitor/config.ini", "monitor"]
+    keep_alive true
+    working_dir var/"lib/network-monitor"
+    log_path var/"log/network-monitor/service.log"
+    error_log_path var/"log/network-monitor/service.error.log"
+  end
+
+  def caveats
+    <<~EOS
+      Configuration: #{etc}/network-monitor/config.ini
+      Database: #{var}/lib/network-monitor/network-monitor.db
+
+      Start collection with: brew services start network-monitor
+      View today's statistics with: network-monitor stats
+      Use brew services to manage this installation.
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/network-monitor --version")
+    assert_match "SQLite", shell_output("#{bin}/network-monitor monitor --help")
+    system bin/"network-monitor", "monitor", "--interface", "lo0",
+           "--database", testpath/"samples.db", "--count", "1"
+    assert_match "采样：1 次", shell_output("#{bin}/network-monitor stats --interface lo0 " \
+                                          "--database #{testpath}/samples.db --no-chart " \
+                                          "--start 0 --end 4102444800")
+  end
+end
