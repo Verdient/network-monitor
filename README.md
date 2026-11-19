@@ -5,10 +5,9 @@
 
 ## 按操作系统下载
 
-| 操作系统 | 架构 | 下载 |
-| --- | --- | --- |
-| macOS 14+ | Apple Silicon（ARM64） | [下载 tar.gz](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-arm64.tar.gz) |
-| macOS 14+ | Intel（x86_64） | [下载 tar.gz](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-x86_64.tar.gz) |
+| 操作系统 | 下载 |
+| --- | --- |
+| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-x86_64.tar.gz) |
 
 下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
 可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/SHA256SUMS) 校验下载文件。
