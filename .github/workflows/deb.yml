@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - name: 在 Debian 11 基线环境构建独立可执行文件和安装包
         run: |
-          docker run --rm -v "$PWD:/work" -w /work python:3.12-bullseye sh -ec '
+          python3 scripts/ci_run.py docker run --rm -v "$PWD:/work" -w /work python:3.12-bullseye sh -ec '
             apt-get update -qq
             apt-get install -y --no-install-recommends binutils iproute2 systemd
             python -m pip install -r requirements-build.txt
@@ -45,9 +45,9 @@ jobs:
           '
           sudo chown -R "$(id -u):$(id -g)" build dist release
       - name: 在无 Python 的 Debian 11 中验证安装和采集
-        run: docker run --rm -v "$PWD:/work:ro" -w /tmp debian:bullseye sh /work/scripts/test_deb_container.sh
+        run: python3 scripts/ci_run.py docker run --rm -v "$PWD:/work:ro" -w /tmp debian:bullseye sh /work/scripts/test_deb_container.sh
       - name: 验证 systemd 服务以及安装、升级和卸载
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 scripts/test_deb.py release/*.deb
+        run: python3 scripts/ci_run.py sudo --preserve-env=GITHUB_ACTIONS python3 scripts/test_deb.py release/*.deb
       - uses: actions/upload-artifact@v5
         with:
           name: linux-${{ matrix.architecture }}
