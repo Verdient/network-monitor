@@ -7,6 +7,7 @@ from importlib.metadata import distribution
 from pathlib import Path
 import platform
 import re
+import subprocess
 import sys
 import sysconfig
 import tarfile
@@ -40,7 +41,7 @@ def third_party_notices():
 def archive(binary, output, version):
     check_version(version)
     if platform.system() != 'Darwin':
-        raise ValueError('首版 Release 只构建 macOS，请在 macOS runner 上打包')
+        raise ValueError('macOS 发布包必须在 macOS 上构建')
     architecture = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x86_64'}.get(platform.machine().lower())
     if architecture is None:
         raise ValueError('不支持的 CPU 架构')
@@ -77,6 +78,8 @@ def generate_formula(assets, output, version):
         formula = formula.replace(placeholder, digest)
         checksums.append('{}  {}\n'.format(digest, path.name))
     formula = formula.replace('@VERSION@', version)
+    for package in sorted(assets.glob('network-monitor_{}-1_*.deb'.format(version))):
+        checksums.append('{}  {}\n'.format(hashlib.sha256(package.read_bytes()).hexdigest(), package.name))
     output.mkdir(parents=True, exist_ok=True)
     (output / 'network-monitor.rb').write_text(formula, encoding='utf-8')
     (output / 'SHA256SUMS').write_text(''.join(checksums), encoding='utf-8')
@@ -102,6 +105,9 @@ def main():
     bundle = commands.add_parser('archive')
     bundle.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor')
     bundle.add_argument('--output', type=Path, default=ROOT / 'release')
+    deb = commands.add_parser('deb', help='构建 Linux deb 安装包')
+    deb.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor')
+    deb.add_argument('--output', type=Path, default=ROOT / 'release')
     formula = commands.add_parser('formula')
     formula.add_argument('--assets', type=Path, required=True)
     formula.add_argument('--output', type=Path, required=True)
@@ -111,11 +117,14 @@ def main():
     try:
         if arguments.command == 'archive':
             archive(arguments.binary, arguments.output, arguments.version)
+        elif arguments.command == 'deb':
+            from scripts.deb import build
+            build(arguments.binary, arguments.output, arguments.version)
         elif arguments.command == 'formula':
             generate_formula(arguments.assets, arguments.output, arguments.version)
         else:
             release_notes(arguments.output, arguments.version)
-    except (OSError, ValueError, tarfile.TarError) as error:
+    except (OSError, ValueError, tarfile.TarError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
 
 

@@ -7,6 +7,7 @@
 | 操作系统 | 下载 |
 | --- | --- |
 | macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-x86_64.tar.gz) |
+| Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor_@VERSION@-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor_@VERSION@-1_arm64.deb) |
 
 可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/SHA256SUMS) 校验下载文件。
 

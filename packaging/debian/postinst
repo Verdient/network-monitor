@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    if ! getent group network-monitor >/dev/null; then
+        addgroup --system --quiet network-monitor
+    fi
+    if ! getent passwd network-monitor >/dev/null; then
+        adduser --system --ingroup network-monitor --home /var/lib/network-monitor --no-create-home --quiet network-monitor
+    fi
+    install -d -m 0755 -o network-monitor -g network-monitor /var/lib/network-monitor
+    deb-systemd-helper unmask network-monitor.service >/dev/null || true
+    if deb-systemd-helper --quiet was-enabled network-monitor.service; then
+        deb-systemd-helper enable network-monitor.service >/dev/null || true
+    else
+        deb-systemd-helper update-state network-monitor.service >/dev/null || true
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        if [ -n "${2:-}" ]; then
+            deb-systemd-invoke try-restart network-monitor.service || true
+        else
+            deb-systemd-invoke start network-monitor.service || true
+        fi
+    fi
+fi

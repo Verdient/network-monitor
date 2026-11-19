@@ -51,6 +51,19 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'LICENSE'):
             release.generate_formula(self.root, self.root / 'formula', __version__)
 
+    def test_release_checksums_include_debian_packages(self):
+        self.assets()
+        packages = []
+        for architecture in ('amd64', 'arm64'):
+            package = self.root / 'network-monitor_{}-1_{}.deb'.format(__version__, architecture)
+            package.write_bytes(architecture.encode('ascii'))
+            packages.append(package)
+        output = self.root / 'formula'
+        release.generate_formula(self.root, output, __version__)
+        checksums = (output / 'SHA256SUMS').read_text()
+        for package in packages:
+            self.assertIn('{}  {}\n'.format(hashlib.sha256(package.read_bytes()).hexdigest(), package.name), checksums)
+
     def test_nonexecutable_binary_prevents_formula_generation(self):
         self.assets(executable=False)
         with self.assertRaisesRegex(ValueError, '执行权限'):

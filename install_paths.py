@@ -21,6 +21,12 @@ def homebrew_prefix():
     return prefix
 
 
+def debian_package():
+    if not getattr(sys, 'frozen', False) or platform.system() != 'Linux':
+        return False
+    return (Path(sys.executable).resolve().parent / 'debian-package').is_file()
+
+
 @dataclass(frozen=True)
 class Layout:
     executable: Path

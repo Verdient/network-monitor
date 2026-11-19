@@ -7,15 +7,18 @@
 
 | 操作系统 | 下载 |
 | --- | --- |
-| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-x86_64.tar.gz) |
+| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-x86_64.tar.gz) |
+| Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_arm64.deb) |
 
-下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
-可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/SHA256SUMS) 校验下载文件。
+macOS 的 tar.gz 下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
+Linux 下载 deb 安装包后，按下面的步骤安装。
+可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/SHA256SUMS) 校验下载文件。
 
 完整更新记录：[ChangeLog](CHANGELOG.md)。
-下文介绍通过 Homebrew 安装、配置和管理后台服务的方法。
 
 ## 安装
+
+### macOS：Homebrew
 
 需要 macOS 14 或更新版本，支持 Apple Silicon 和 Intel。先安装 [Homebrew](https://brew.sh/)，然后运行：
 
@@ -29,12 +32,34 @@ brew install Verdient/tap/network-monitor
 network-monitor --version
 ```
 
+### Linux：deb 安装包
+
+支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。用 `dpkg --print-architecture` 查看架构，
+下载对应的 deb 文件，然后在下载目录运行：
+
+```bash
+# amd64（常见 Intel / AMD 64 位机器）
+sudo apt install ./network-monitor_0.2.0-1_amd64.deb
+
+# arm64（64 位 ARM 机器）
+sudo apt install ./network-monitor_0.2.0-1_arm64.deb
+```
+
+两条命令按架构选择一条即可，无需安装 Python。使用 systemd 的系统会自动启动采集并设置开机启动。
+安装包已包含服务，使用 `systemctl` 管理即可。
+
 ## 开始采集
 
-启动后台采集，并设置为登录后自动启动：
+macOS 启动后台采集，并设置为登录后自动启动：
 
 ```bash
 brew services start network-monitor
+```
+
+Linux 的 deb 安装完成后已启动后台采集；如果需要手动启动：
+
+```bash
+sudo systemctl start network-monitor
 ```
 
 默认每秒采集一次，使用默认路由对应的网卡。首次启动后等待几秒，再查看统计：
@@ -56,7 +81,7 @@ network-monitor stats
 network-monitor stats -i en0
 ```
 
-将 `en0` 换成实际网卡名，可用 `ifconfig -l` 查看。
+将 `en0` 换成实际网卡名，macOS 可用 `ifconfig -l` 查看，Linux 可用 `ip link show` 查看，例如 `eth0`、`ens3`。
 同时采集多张网卡时，每次统计选择其中一张。
 
 ### 选择日期或时间范围
@@ -97,11 +122,18 @@ network-monitor stats --width 80 --height 8
 ## 配置采集网卡与采样间隔
 
 Homebrew 安装的配置文件位于 `$(brew --prefix)/etc/network-monitor/config.ini`。
+Linux deb 安装的配置文件位于 `/etc/network-monitor/config.ini`。
 
 用编辑器打开它：
 
 ```bash
 nano "$(brew --prefix)/etc/network-monitor/config.ini"
+```
+
+Linux 使用：
+
+```bash
+sudo nano /etc/network-monitor/config.ini
 ```
 
 保留文件中已有的 `database` 路径，按需修改以下设置：
@@ -125,6 +157,8 @@ timezone = Asia/Shanghai
 ```bash
 brew services restart network-monitor
 ```
+
+Linux 使用 `sudo systemctl restart network-monitor`。如果修改数据库位置，需要让 `network-monitor` 服务用户对新目录具有读写权限。
 
 也可以临时指定配置文件或覆盖参数：
 
@@ -152,19 +186,32 @@ network-monitor stats -d ./traffic.db -i en0
 
 ## 服务管理
 
+macOS（Homebrew）：
+
 ```bash
 brew services info network-monitor      # 查看状态
 brew services restart network-monitor   # 重启
 brew services stop network-monitor      # 停止并取消登录后启动
 ```
 
+Linux（deb / systemd）：
+
+```bash
+systemctl status network-monitor              # 查看状态
+sudo systemctl restart network-monitor        # 重启
+sudo systemctl stop network-monitor           # 停止
+sudo systemctl disable --now network-monitor  # 停止并取消开机启动
+sudo systemctl enable --now network-monitor   # 启用开机启动并立即启动
+journalctl -u network-monitor -f               # 查看日志，权限不足时加 sudo
+```
+
 ## 数据与日志
 
-| 内容 | 位置 |
-| --- | --- |
-| 配置 | `$(brew --prefix)/etc/network-monitor/config.ini` |
-| 数据库 | `$(brew --prefix)/var/lib/network-monitor/network-monitor.db` |
-| 日志 | `$(brew --prefix)/var/log/network-monitor/` |
+| 内容 | macOS（Homebrew） | Linux（deb） |
+| --- | --- | --- |
+| 配置 | `$(brew --prefix)/etc/network-monitor/config.ini` | `/etc/network-monitor/config.ini` |
+| 数据库 | `$(brew --prefix)/var/lib/network-monitor/network-monitor.db` | `/var/lib/network-monitor/network-monitor.db` |
+| 日志 | `$(brew --prefix)/var/log/network-monitor/` | `journalctl -u network-monitor` |
 
 修改配置中的 `database` 后，以配置的路径为准。
 历史数据持续保留，不会自动清理。每张网卡每秒采样时，数据量参考值约为 4 MiB/天。
@@ -190,6 +237,18 @@ brew uninstall network-monitor
 ```
 
 卸载会保留配置和历史数据，便于重新安装后继续使用。
+
+Linux 更新时，从 [Releases](https://github.com/Verdient/network-monitor/releases/latest) 下载新版本对应架构的 deb，
+再运行 `sudo apt install ./下载的文件名.deb`。升级会保留配置和历史数据，并重启正在运行的采集服务；
+已停止或禁用的服务不会被自动启动。
+
+Linux 卸载：
+
+```bash
+sudo apt remove network-monitor
+```
+
+卸载会停止服务并保留配置、历史数据。使用 `sudo apt purge network-monitor` 可同时移除配置，历史数据仍会保留。
 
 ## 帮助
 

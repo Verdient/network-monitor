@@ -173,6 +173,22 @@ class InstallPathTests(unittest.TestCase):
                 service_install.run(args, parser)
         install.assert_not_called()
 
+    def test_debian_marker_detects_managed_program_and_prevents_reinstallation(self):
+        binary = self.root / 'usr/lib/network-monitor/network-monitor'
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b'program')
+        (binary.parent / 'debian-package').write_text('network-monitor\n', encoding='utf-8')
+        parser, _ = network_monitor.build_parser()
+        args = parser.parse_args(['install', '--yes'])
+        with patch('install_paths.sys.frozen', True, create=True), \
+                patch('install_paths.sys.executable', str(binary)), \
+                patch('install_paths.platform.system', return_value='Linux'), \
+                patch('service_install.install') as install:
+            self.assertTrue(install_paths.debian_package())
+            with self.assertRaisesRegex(RuntimeError, 'systemctl'):
+                service_install.run(args, parser)
+        install.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

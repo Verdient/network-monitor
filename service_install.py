@@ -229,6 +229,9 @@ def install(plan):
 
 
 def run(args, parser):
+    if install_paths.debian_package():
+        raise RuntimeError('通过 deb 安装的程序已包含 systemd 服务，请使用 sudo systemctl start network-monitor 启动，'
+                           '使用 sudo systemctl restart/stop network-monitor 管理服务')
     if install_paths.homebrew_prefix() is not None:
         raise RuntimeError('通过 Homebrew 安装的程序请使用 brew services start network-monitor 启动，'
                            '使用 brew services restart/stop network-monitor 管理服务')

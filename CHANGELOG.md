@@ -1,5 +1,13 @@
 # 更新日志
 
+## [0.2.0](https://github.com/Verdient/network-monitor/releases/tag/v0.2.0) - 2026-11-19
+
+- 新增 Linux amd64 和 arm64 的 deb 安装包，支持 Debian 11+、Ubuntu 20.04+，无需安装 Python。
+- 安装包包含 systemd 服务，安装后自动开始采集，支持开机启动。
+- 升级保留配置、历史数据和服务禁用状态；卸载停止服务并保留数据。
+- 支持普通用户查询后台服务采集的数据，包括服务停止后的历史数据。
+- 下载页面提供 Linux 架构徽章，校验和覆盖 macOS 和 Linux 安装包。
+
 ## [0.1.0](https://github.com/Verdient/network-monitor/releases/tag/v0.1.0) - 2026-11-19
 
 - 支持通过 Homebrew 安装，并提供 macOS 14+ 的 Apple Silicon 和 Intel 独立可执行文件。

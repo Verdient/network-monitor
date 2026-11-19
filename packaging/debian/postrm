@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ]; then
+    deb-systemd-helper mask network-monitor.service >/dev/null || true
+fi
+if [ "$1" = purge ]; then
+    deb-systemd-helper purge network-monitor.service >/dev/null || true
+    deb-systemd-helper unmask network-monitor.service >/dev/null || true
+fi
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+    fi
+fi

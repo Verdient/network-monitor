@@ -1,6 +1,6 @@
 """SQLite storage partitioned by interface and Unix day (86,400 seconds)."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 import math
@@ -76,16 +76,37 @@ def reader(path):
     path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError('找不到数据库: {}'.format(path))
-    connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)
-    try:
+    def begin(connection):
         connection.execute('PRAGMA query_only = ON')
         connection.execute('BEGIN')
         if (connection.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID
                 or connection.execute('PRAGMA user_version').fetchone()[0] != VERSION):
             raise RuntimeError('该文件不是受支持的 network-monitor 数据库')
+
+    with ExitStack() as resources:
+        connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)
+        resources.callback(connection.close)
+        try:
+            begin(connection)
+        except sqlite3.OperationalError as error:
+            # A stopped WAL database may need to create -wal/-shm files, even
+            # for a read-only connection. Only use immutable mode while holding
+            # the collector's lock, so a collector cannot write during the query.
+            if getattr(error, 'sqlite_errorcode', 0) & 0xff != sqlite3.SQLITE_READONLY:
+                raise
+            connection.close()
+            import fcntl
+            try:
+                lock = resources.enter_context(Path(str(path) + '.lock').open('rb'))
+                fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except OSError:
+                raise error
+            if Path(str(path) + '-wal').exists():
+                raise error
+            connection = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=5)
+            resources.callback(connection.close)
+            begin(connection)
         yield connection
-    finally:
-        connection.close()
 
 
 def tables_for(connection, interface, start, end):

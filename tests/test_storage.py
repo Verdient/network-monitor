@@ -1,6 +1,7 @@
 import contextlib
 import datetime as dt
 import io
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -96,6 +97,33 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 connection.execute('DELETE FROM partitions')
         self.assertEqual(self.summary('eth0').count, 2)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root 不受目录写权限限制')
+    def test_unprivileged_reader_can_query_stopped_service_database(self):
+        import fcntl
+        self.writer.write(BASE, 1, {'eth0': (10, 20)})
+        self.writer.close()
+        lock = Path(str(self.path) + '.lock')
+        lock.touch()
+        self.path.chmod(0o444)
+        self.path.parent.chmod(0o555)
+        try:
+            with storage.reader(self.path) as connection:
+                tables = storage.tables_for(connection, 'eth0', BASE, BASE + 10)
+                self.assertEqual(storage.summarize(connection, tables, BASE, BASE + 10).totals, [10, 20, 30])
+                with lock.open('rb') as competitor, self.assertRaises(BlockingIOError):
+                    fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(sqlite3.OperationalError):
+                    connection.execute('DELETE FROM partitions')
+            self.assertFalse(Path(str(self.path) + '-wal').exists())
+            with lock.open('rb') as competitor:
+                fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(sqlite3.OperationalError):
+                    with storage.reader(self.path):
+                        self.fail('采集锁被占用时不得使用不可变数据库模式')
+        finally:
+            self.path.parent.chmod(0o755)
+            self.path.chmod(0o644)
 
     def test_existing_unrelated_database_is_not_modified(self):
         path = self.path.parent / 'other.db'

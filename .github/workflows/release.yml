@@ -12,6 +12,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  deb:
+    uses: ./.github/workflows/deb.yml
+
   build:
     strategy:
       fail-fast: false
@@ -103,7 +106,7 @@ jobs:
           network-monitor stats --help
 
   draft-release:
-    needs: [build, brew-test]
+    needs: [build, brew-test, deb]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -144,6 +147,7 @@ jobs:
           else:
               subprocess.run(['gh', 'release', 'create', tag, '--draft', '--verify-tag',
                               '--title', tag, '--notes-file', str(notes)], check=True)
-          files = sorted(Path('assets').glob('*.tar.gz')) + [Path('formula/SHA256SUMS'), Path('formula/network-monitor.rb')]
+          files = sorted(Path('assets').glob('*.tar.gz')) + sorted(Path('assets').glob('*.deb'))
+          files += [Path('formula/SHA256SUMS'), Path('formula/network-monitor.rb')]
           subprocess.run(['gh', 'release', 'upload', tag, '--clobber', *map(str, files)], check=True)
           PY
