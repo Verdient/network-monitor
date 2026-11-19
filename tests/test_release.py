@@ -61,6 +61,37 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 release.check_version(version)
 
+    def test_notes_select_matching_changelog_and_use_versioned_downloads(self):
+        (self.root / 'packaging').mkdir()
+        (self.root / 'packaging/release-notes.md.in').write_text(
+            (release.ROOT / 'packaging/release-notes.md.in').read_text(encoding='utf-8'), encoding='utf-8')
+        (self.root / 'CHANGELOG.md').write_text(
+            '# 更新日志\n\n## [未发布]\n\n- 不应混入的内容\n\n'
+            '## [{}](https://example.com) - 2026-11-19\n\n- 本次新增功能\n\n'
+            '## [0.0.0]\n\n- 历史功能\n'.format(__version__), encoding='utf-8')
+        output = self.root / 'notes.md'
+        with patch('scripts.release.ROOT', self.root):
+            release.release_notes(output, __version__)
+        notes = output.read_text(encoding='utf-8')
+        self.assertIn('本次新增功能', notes)
+        self.assertNotIn('不应混入的内容', notes)
+        self.assertNotIn('历史功能', notes)
+        self.assertNotIn('@VERSION@', notes)
+        self.assertNotIn('@CHANGES@', notes)
+        for architecture in ('arm64', 'x86_64'):
+            self.assertIn('releases/download/v{0}/network-monitor-{0}-macos-{1}.tar.gz'.format(
+                __version__, architecture), notes)
+        self.assertIn('CHANGELOG.md', notes)
+
+    def test_notes_require_changelog_for_release_version(self):
+        for content in ('# 更新日志\n', '## [{}]\n\n'.format(__version__)):
+            with self.subTest(content=content):
+                (self.root / 'CHANGELOG.md').write_text(content, encoding='utf-8')
+                output = self.root / 'notes.md'
+                with patch('scripts.release.ROOT', self.root), self.assertRaisesRegex(ValueError, '更新日志'):
+                    release.release_notes(output, __version__)
+                self.assertFalse(output.exists())
+
     def test_archive_has_binary_project_license_and_runtime_notices(self):
         binary = self.root / 'program'
         binary.write_bytes(b'binary')

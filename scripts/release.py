@@ -82,6 +82,19 @@ def generate_formula(assets, output, version):
     (output / 'SHA256SUMS').write_text(''.join(checksums), encoding='utf-8')
 
 
+def release_notes(output, version):
+    check_version(version)
+    changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
+    section = re.search(r'^## \[' + re.escape(version) + r'\][^\n]*\n(.*?)(?=^## |\Z)',
+                        changelog, re.M | re.S)
+    if section is None or not section.group(1).strip():
+        raise ValueError('更新日志缺少版本内容: ' + version)
+    notes = (ROOT / 'packaging/release-notes.md.in').read_text(encoding='utf-8')
+    notes = notes.replace('@VERSION@', version).replace('@CHANGES@', section.group(1).strip())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(notes, encoding='utf-8')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', default=__version__)
@@ -92,12 +105,16 @@ def main():
     formula = commands.add_parser('formula')
     formula.add_argument('--assets', type=Path, required=True)
     formula.add_argument('--output', type=Path, required=True)
+    notes = commands.add_parser('notes')
+    notes.add_argument('--output', type=Path, default=Path('release-notes.md'))
     arguments = parser.parse_args()
     try:
         if arguments.command == 'archive':
             archive(arguments.binary, arguments.output, arguments.version)
-        else:
+        elif arguments.command == 'formula':
             generate_formula(arguments.assets, arguments.output, arguments.version)
+        else:
+            release_notes(arguments.output, arguments.version)
     except (OSError, ValueError, tarfile.TarError) as error:
         parser.error(str(error))
 

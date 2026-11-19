@@ -1,0 +1,51 @@
+name: 同步发布说明
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+      - packaging/release-notes.md.in
+      - scripts/release.py
+      - .github/workflows/release-notes.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-notes
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 生成发布说明
+        run: python scripts/release.py notes
+      - name: 更新对应版本的发布说明
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from version import __version__
+          tag = 'v' + __version__
+          repository = os.environ['GH_REPO']
+          releases = json.loads(subprocess.check_output(
+              ['gh', 'api', '--paginate', '--slurp', f'repos/{repository}/releases'],
+              text=True))
+          if not any(release['tag_name'] == tag for page in releases for release in page):
+              print(f'{tag} 尚未创建，发布时将自动使用生成的说明。')
+          else:
+              subprocess.run(['gh', 'release', 'edit', tag, '--notes-file', 'release-notes.md'], check=True)
+          PY

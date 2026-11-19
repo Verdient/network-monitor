@@ -3,6 +3,19 @@
 记录网卡的上传、下载速度和累计流量，查看每天或指定时间段的平均网速、峰值与趋势图。
 支持同时采集多张网卡，数据保存在本机，重启后可继续查询。
 
+## 按操作系统下载
+
+| 操作系统 | 架构 | 下载 |
+| --- | --- | --- |
+| macOS 14+ | Apple Silicon（ARM64） | [下载 tar.gz](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-arm64.tar.gz) |
+| macOS 14+ | Intel（x86_64） | [下载 tar.gz](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/network-monitor-0.1.0-macos-x86_64.tar.gz) |
+
+下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
+可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.1.0/SHA256SUMS) 校验下载文件。
+
+完整更新记录：[ChangeLog](CHANGELOG.md)。
+下文介绍通过 Homebrew 安装、配置和管理后台服务的方法。
+
 ## 安装
 
 需要 macOS 14 或更新版本，支持 Apple Silicon 和 Intel。先安装 [Homebrew](https://brew.sh/)，然后运行：

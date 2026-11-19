@@ -120,6 +120,8 @@ jobs:
           merge-multiple: true
       - name: Generate public formula and checksums
         run: python scripts/release.py formula --assets assets --output formula
+      - name: 生成中文发布说明
+        run: python scripts/release.py notes
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,19 +134,13 @@ jobs:
           from pathlib import Path
           tag = os.environ['RELEASE_TAG']
           notes = Path('release-notes.md')
-          notes.write_text(
-              'macOS 14+ standalone binaries for Apple Silicon and Intel.\n\n'
-              'Download the archive matching your CPU and verify it with SHA256SUMS.\n'
-              'The archive includes the project license and third-party notices.\n\n'
-              'Homebrew: brew install Verdient/tap/network-monitor\n'
-              'Service: brew services start network-monitor\n'
-          )
           existing = subprocess.run(['gh', 'release', 'view', tag, '--json', 'isDraft'],
                                     capture_output=True, text=True)
           if existing.returncode == 0:
               import json
               if not json.loads(existing.stdout)['isDraft']:
                   raise SystemExit('Refusing to replace an already published release')
+              subprocess.run(['gh', 'release', 'edit', tag, '--notes-file', str(notes)], check=True)
           else:
               subprocess.run(['gh', 'release', 'create', tag, '--draft', '--verify-tag',
                               '--title', tag, '--notes-file', str(notes)], check=True)
