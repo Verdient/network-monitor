@@ -1,25 +1,13 @@
+## 本次更新
+
+@CHANGES@
+
 ## 按操作系统下载
 
 | 操作系统 | 下载 |
 | --- | --- |
 | macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/network-monitor-@VERSION@-macos-x86_64.tar.gz) |
 
-下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
 可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v@VERSION@/SHA256SUMS) 校验下载文件。
 
-## 通过 Homebrew 安装
-
-```bash
-brew install Verdient/tap/network-monitor
-brew services start network-monitor
-network-monitor stats
-```
-
-已安装的用户可运行 `brew update`、`brew upgrade network-monitor`，再运行 `brew services restart network-monitor` 重启采集。
-
-## 本次更新
-
-@CHANGES@
-
 完整更新记录：[ChangeLog](https://github.com/Verdient/network-monitor/blob/main/CHANGELOG.md)。
-安装、配置和更多用法见 [使用说明](https://github.com/Verdient/network-monitor#readme)。
