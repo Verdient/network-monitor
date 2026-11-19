@@ -1,0 +1,86 @@
+name: 发布 APT 软件源
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apt.yml
+      - packaging/apt/**
+      - scripts/apt_repository.py
+      - tests/test_apt_repository.py
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.signing.outputs.available }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - name: 安装索引生成和签名工具
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends apt-utils dpkg-dev gnupg
+      - name: 验证签名和 APT 客户端读取
+        run: python3 scripts/ci_run.py python3 -m unittest -v tests.test_apt_repository
+      - name: 检查签名密钥配置
+        id: signing
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [ -n "$APT_SIGNING_KEY" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::notice title=等待配置签名密钥::请添加 APT_SIGNING_KEY 仓库 Secret，然后手动运行本工作流。'
+          fi
+      - name: 导入签名密钥并生成软件源
+        if: steps.signing.outputs.available == 'true'
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          umask 077
+          export GNUPGHOME="$RUNNER_TEMP/network-monitor-apt-gnupg"
+          mkdir -p "$GNUPGHOME"
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          python3 scripts/ci_run.py python3 scripts/apt_repository.py --download --gnupghome "$GNUPGHOME"
+          chmod -R a+rX apt-site
+      - name: 上传 Pages 站点
+        if: steps.signing.outputs.available == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt-site
+      - name: 清理签名密钥
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/network-monitor-apt-gnupg" ]; then
+            gpgconf --homedir "$RUNNER_TEMP/network-monitor-apt-gnupg" --kill gpg-agent
+            rm -rf "$RUNNER_TEMP/network-monitor-apt-gnupg"
+          fi
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署 APT 软件源
+        id: deployment
+        uses: actions/deploy-pages@v4

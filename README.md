@@ -32,7 +32,30 @@ brew install Verdient/tap/network-monitor
 network-monitor --version
 ```
 
-### Linux：deb 安装包
+### Linux：APT 软件源
+
+支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。首次安装时添加软件源：
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -d -m 0755 /etc/apt/keyrings
+
+curl -fsSL https://verdient.github.io/network-monitor/signing-key.asc \
+  | sudo tee /etc/apt/keyrings/network-monitor.asc >/dev/null
+sudo chmod 0644 /etc/apt/keyrings/network-monitor.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/network-monitor.asc] https://verdient.github.io/network-monitor stable main" \
+  | sudo tee /etc/apt/sources.list.d/network-monitor.list
+
+sudo apt update
+sudo apt install network-monitor
+```
+
+安装后会自动启动 systemd 后台采集，后续可以通过 APT 更新。
+软件源与签名公钥说明见 [APT 软件源](https://verdient.github.io/network-monitor/)。
+
+### Linux：直接安装 deb
 
 支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。用 `dpkg --print-architecture` 查看架构，
 下载对应的 deb 文件，然后在下载目录运行：
@@ -238,7 +261,14 @@ brew uninstall network-monitor
 
 卸载会保留配置和历史数据，便于重新安装后继续使用。
 
-Linux 更新时，从 [Releases](https://github.com/Verdient/network-monitor/releases/latest) 下载新版本对应架构的 deb，
+Linux 添加 APT 软件源后，更新方式如下：
+
+```bash
+sudo apt update
+sudo apt install --only-upgrade network-monitor
+```
+
+直接安装 deb 的用户，也可以从 [Releases](https://github.com/Verdient/network-monitor/releases/latest) 下载新版本对应架构的 deb，
 再运行 `sudo apt install ./下载的文件名.deb`。升级会保留配置和历史数据，并重启正在运行的采集服务；
 已停止或禁用的服务不会被自动启动。
 

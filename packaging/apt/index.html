@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>network-monitor · APT 软件源</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.7; }
+  body { max-width: 56rem; margin: 4rem auto; padding: 0 1.5rem; }
+  h1 { line-height: 1.2; }
+  pre { padding: 1.25rem; border: 1px solid #8886; border-radius: .5rem; overflow-x: auto; }
+  code { font-family: ui-monospace, monospace; }
+  a { color: #3485dc; }
+  .fingerprint { overflow-wrap: anywhere; }
+</style>
+<h1>network-monitor APT 软件源</h1>
+<p>记录网卡速度和流量，查询本机历史统计。支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。</p>
+<h2>添加软件源并安装</h2>
+<p>如果系统没有 <code>curl</code>，先运行 <code>sudo apt install ca-certificates curl</code>。</p>
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://verdient.github.io/network-monitor/signing-key.asc \
+  | sudo tee /etc/apt/keyrings/network-monitor.asc &gt;/dev/null
+sudo chmod 0644 /etc/apt/keyrings/network-monitor.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/network-monitor.asc] https://verdient.github.io/network-monitor stable main" \
+  | sudo tee /etc/apt/sources.list.d/network-monitor.list
+
+sudo apt update
+sudo apt install network-monitor</code></pre>
+<p>使用 systemd 的系统安装后会自动采集，并设置开机启动。等待几秒后运行 <code>network-monitor stats</code> 查看今天的统计。</p>
+<h2>更新与卸载</h2>
+<pre><code>sudo apt update
+sudo apt install --only-upgrade network-monitor
+
+# 卸载程序并保留配置和历史数据
+sudo apt remove network-monitor</code></pre>
+<p>使用 <code>sudo apt purge network-monitor</code> 可同时移除配置，历史数据仍会保留。</p>
+<h2>签名公钥</h2>
+<p><a href="signing-key.asc">下载公钥</a> · 指纹：<code class="fingerprint">@FINGERPRINT@</code></p>
+<p><a href="https://github.com/Verdient/network-monitor#readme">完整使用说明</a> · <a href="https://github.com/Verdient/network-monitor/releases">版本下载</a></p>
+</html>
