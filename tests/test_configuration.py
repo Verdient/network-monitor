@@ -22,7 +22,7 @@ class ConfigurationDiscoveryTests(unittest.TestCase):
             with patch('configuration.search_paths', return_value=[private, system]), \
                     patch.object(Path, 'exists', exists):
                 defaults, selected = configuration.load()
-            self.assertEqual(selected, system)
+            self.assertEqual(selected, system.resolve())
             self.assertEqual(defaults, {'monitor': {'interval': 3}})
 
     def test_explicit_unreadable_configuration_reports_an_error(self):
