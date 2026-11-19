@@ -4,6 +4,9 @@
 
 Tap：https://github.com/Verdient/homebrew-tap
 
+首版 `v0.1.0` 已发布，正式配方位于 Tap 的 `Formula/network-monitor.rb`。
+以下流程用于后续版本维护。
+
 1. 源码推送到 `main` 后，确认 CI 在 Linux、macOS ARM64 和 Intel 上通过。
 2. `version.py` 中首版版本为 `0.1.0`。创建并推送 `v0.1.0` 标签。
 3. `Release` 工作流会分别构建两个 macOS 二进制，测试源码与可执行文件，生成归档，

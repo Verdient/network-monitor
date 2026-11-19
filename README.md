@@ -7,7 +7,8 @@
 
 ## Homebrew 安装
 
-首次 Release 和 Tap 发布完成后，macOS 14+ 用户可以安装：
+macOS 14+ 用户可以通过 [Homebrew Tap](https://github.com/Verdient/homebrew-tap) 安装
+[v0.1.0](https://github.com/Verdient/network-monitor/releases/tag/v0.1.0)：
 
 ```bash
 brew install Verdient/tap/network-monitor
