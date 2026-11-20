@@ -7,12 +7,12 @@
 
 | 操作系统 | 下载 |
 | --- | --- |
-| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-x86_64.tar.gz) |
-| Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_arm64.deb) |
+| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor-0.3.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor-0.3.0-macos-x86_64.tar.gz) |
+| Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor_0.3.0-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor_0.3.0-1_arm64.deb) |
 
 macOS 的 tar.gz 下载包解压后，运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。请把 `network-monitor-runtime` 目录与可执行文件保留在同一目录。
 Linux 下载 deb 安装包后，按下面的步骤安装。
-可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/SHA256SUMS) 校验下载文件。
+可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/SHA256SUMS) 校验下载文件。
 
 完整更新记录：[ChangeLog](CHANGELOG.md)。
 
@@ -62,10 +62,10 @@ sudo apt install network-monitor
 
 ```bash
 # amd64（常见 Intel / AMD 64 位机器）
-sudo apt install ./network-monitor_0.2.0-1_amd64.deb
+sudo apt install ./network-monitor_0.3.0-1_amd64.deb
 
 # arm64（64 位 ARM 机器）
-sudo apt install ./network-monitor_0.2.0-1_arm64.deb
+sudo apt install ./network-monitor_0.3.0-1_arm64.deb
 ```
 
 两条命令按架构选择一条即可，无需安装 Python。使用 systemd 的系统会自动启动采集并设置开机启动。
@@ -93,8 +93,38 @@ network-monitor stats
 
 ## 查看统计
 
-默认显示系统时区当天的数据，包括上传、下载、合计的平均速度、峰值、最低速度、累计流量和趋势图。
-速度单位为 Mbps，流量以 B、KB、MB、GB 等显示。
+直接在终端运行 `network-monitor` 即可查看默认网卡的实时仪表盘，按 `q` 退出。`network-monitor -h` 列出实时选项和可用命令。运行 `network-monitor stats` 可查看一次历史统计，默认查询系统时区当天的数据。
+
+在终端中，宽屏左侧显示下载、上传和合计，右侧显示同一时段的波形。实时采样时大号数字显示当前网速，查历史时显示累计流量。缩小窗口后，统计移到波形上方。流量占比按所查时段的累计字节数计算。
+
+青色下载画在零线上方，粉色上传画在下方，两侧独立标尺，速率越高颜色越浅。箭头标出每个方向最高的分段平均速率，空间足够时还会显示该段的起止时间。零线上的琥珀色虚线 `┄` 表示该段缺少采样，实测速率为零时，波形贴着零线。
+
+```bash
+network-monitor --last 15m
+```
+
+实时仪表盘从 SQLite 读取打开之前的历史记录，随后每秒读取一次所选网卡。当前速率、累计流量和趋势图都会更新。即使没有启动后台采集或还没有数据库，等一个采样间隔就能看到第一个实时数据点。实时样本只保存在本次会话的内存中，退出后即清除。
+
+实时趋势图固定左端起点，右端随当前时间推进，到达 `--end` 时停止延伸。每次刷新都会按图表宽度均分整个时间段，每个字符宽度可显示两个独立的数据点。上传和下载的纵轴上限分别取该方向图中最高速率的 1.25 倍。
+
+默认从启动当天的零点开始。使用 `network-monitor --last 15m` 时，从启动前 15 分钟开始，之后持续显示从该起点累积到现在的数据。
+
+实时模式默认每秒更新一次。按 `+` 将刷新间隔延长 0.1 秒，按 `-` 将间隔缩短 0.1 秒，最短间隔为 0.1 秒。底栏显示当前间隔，也可以在启动时指定。
+
+```bash
+network-monitor --last 15m --interval 0.5
+```
+
+拉高实时窗口会增加波形的绘图行数，快捷键始终位于底部。按 `c` 切到本机 TCP 连接，再按一次回到所选网卡的流量。切换视图期间采样照常进行。
+
+连接页显示已建立、监听、TIME_WAIT 和其他状态的套接字数量。对端列表同时包含 IPv4 和 IPv6，按每个 IP 的已建立连接数排序。列表跨页时，用 `j` 下一页、`k` 上一页。趋势图显示最近最多 120 次读取的已建立连接数。Linux 读取当前网络命名空间的连接表，macOS 读取本机连接表。连接信息只保存在本次实时会话中。
+
+按 `i` 查看所选网卡上各对端 IPv4、IPv6 的下载速率、上传速率和双向累计流量。列表按当前双向速率之和排序，按 `j`、`k` 翻页，再按 `i` 返回。首次打开此页开始计数，切换页面继续累计，退出时清除。流量按 IP 包长度计算，包含 IP 头。
+
+IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。
+
+按 `q` 退出。`--last` 支持秒 `s`、分钟 `m`、小时 `h` 和天 `d`，可单独使用。
+使用 `network-monitor stats --plain` 可输出纯文本统计。`network-monitor stats` 重定向输出时也默认使用纯文本。设置 `NO_COLOR=1` 可保留仪表盘并关闭颜色。
 
 ### 选择网卡
 
@@ -133,7 +163,7 @@ network-monitor stats --tz Asia/Shanghai
 # 按 UTC 查询指定日期
 network-monitor stats --tz UTC --start 2026-11-18 --end 2026-11-19
 
-# 只显示统计表
+# 只显示统计指标，省略趋势图
 network-monitor stats --no-chart
 
 # 调整趋势图的宽度和高度

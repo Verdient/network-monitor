@@ -19,7 +19,8 @@ import install_paths
 
 LABEL = 'io.network-monitor'
 UNIT = 'network-monitor.service'
-SOURCE_FILES = ('network_monitor.py', 'monitor.py', 'stats.py', 'configuration.py',
+SOURCE_FILES = ('network_monitor.py', 'monitor.py', 'stats.py', 'stats_display.py', 'tcp_connections.py',
+                'ip_traffic.py', 'configuration.py',
                 'cli_support.py', 'service_install.py', 'storage.py', 'time_ranges.py', 'install_paths.py', 'version.py')
 
 

@@ -128,6 +128,32 @@ class Summary:
     last: float = None
     chart_start: float = None
 
+    def merge(self, other):
+        if not other.count:
+            return
+        self.count += other.count
+        self.duration += other.duration
+        for i in range(3):
+            self.totals[i] += other.totals[i]
+            self.minima[i] = min(self.minima[i], other.minima[i])
+            self.maxima[i] = max(self.maxima[i], other.maxima[i])
+        self.first = other.first if self.first is None else min(self.first, other.first)
+        self.last = other.last if self.last is None else max(self.last, other.last)
+        self.chart_start = other.chart_start if self.chart_start is None else min(self.chart_start, other.chart_start)
+
+    def add_sample(self, timestamp, duration, up, down):
+        self.count += 1
+        self.duration += duration
+        for i, value in enumerate((up, down, up + down)):
+            rate = value * 8 / duration / 1e6
+            self.totals[i] += value
+            self.minima[i] = min(self.minima[i], rate)
+            self.maxima[i] = max(self.maxima[i], rate)
+        self.first = timestamp if self.first is None else min(self.first, timestamp)
+        self.last = timestamp if self.last is None else max(self.last, timestamp)
+        left = timestamp - duration
+        self.chart_start = left if self.chart_start is None else min(self.chart_start, left)
+
 
 def summarize(connection, tables, start, end):
     summary = Summary()
@@ -144,22 +170,21 @@ def summarize(connection, tables, start, end):
             FROM "{}" WHERE timestamp >= ? AND timestamp < ?'''.format(table), (start, end)).fetchone()
         if not row[0]:
             continue
-        summary.count += row[0]
-        summary.duration += row[1]
-        for i, total in enumerate((row[2], row[3], row[2] + row[3])):
-            summary.totals[i] += total
-            summary.minima[i] = min(summary.minima[i], row[7 + i])
-            summary.maxima[i] = max(summary.maxima[i], row[10 + i])
-        summary.first = row[4] if summary.first is None else min(summary.first, row[4])
-        summary.last = row[5] if summary.last is None else max(summary.last, row[5])
-        summary.chart_start = row[6] if summary.chart_start is None else min(summary.chart_start, row[6])
+        summary.merge(Summary(count=row[0], duration=row[1], totals=[row[2], row[3], row[2] + row[3]],
+                              first=row[4], last=row[5], chart_start=row[6],
+                              minima=list(row[7:10]), maxima=list(row[10:13])))
     return summary
 
 
-def chart_series(connection, tables, start, end, summary, columns):
-    """Aggregate in SQL; memory stays proportional to chart width, not row count."""
-    chart_start = summary.chart_start
-    step = max(summary.last - chart_start, 1) / columns
+def chart_series(connection, tables, start, end, summary, columns, live_samples=(), chart_end=None):
+    """Bucket persisted and session samples on the same time axis."""
+    if chart_end is None:
+        chart_start = summary.chart_start
+        chart_end = summary.last
+        step = max(chart_end - chart_start, 1) / columns
+    else:
+        chart_start = start
+        step = (chart_end - chart_start) / columns
     buckets = [[0.0, 0, 0] for _ in range(columns)]
     for table in tables:
         rows = connection.execute('''SELECT min(?, cast((timestamp - ?) / ? AS INTEGER)) AS bucket,
@@ -170,7 +195,12 @@ def chart_series(connection, tables, start, end, summary, columns):
             buckets[bucket][0] += duration
             buckets[bucket][1] += up
             buckets[bucket][2] += down
+    for timestamp, duration, up, down in live_samples:
+        bucket = min(columns - 1, int((timestamp - chart_start) / step))
+        buckets[bucket][0] += duration
+        buckets[bucket][1] += up
+        buckets[bucket][2] += down
     series = [[None if duration == 0 else values[i] * 8 / duration / 1e6
                for duration, *values in buckets] for i in (0, 1)]
     series.append([None if up is None else up + down for up, down in zip(*series)])
-    return chart_start, summary.last, step, series
+    return chart_start, chart_end, step, series

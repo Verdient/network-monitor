@@ -55,6 +55,7 @@ class NetworkMonitor < Formula
       Database: #{var}/lib/network-monitor/network-monitor.db
 
       Start collection with: brew services start network-monitor
+      Open the live dashboard with: network-monitor
       View today's statistics with: network-monitor stats
       Use brew services to manage this installation.
     EOS

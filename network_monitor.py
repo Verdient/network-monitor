@@ -26,6 +26,7 @@ EXAMPLES = {
   network-monitor stats -i eth0 --timezone UTC      按 UTC 统计 eth0
   network-monitor stats --start 2026-11-01 --end 2026-11-20
   network-monitor stats --no-chart                 只显示统计表
+  network-monitor stats --live --last 15m          从启动前 15 分钟开始实时查看
 ''',
     'install': '''示例：
   sudo network-monitor install                    安装并启动系统服务
@@ -38,8 +39,11 @@ EXAMPLES = {
 def build_parser():
     configuration_help = config_help()
     parser = make_parser(prog='network-monitor',
-                         description='network-monitor · 网络流量采集与统计',
+                         usage='%(prog)s [实时选项]\n       %(prog)s [-c PATH] <命令> [命令选项]',
+                         description='直接运行即可打开实时网速仪表盘。按 c 查看 TCP 连接，i 查看 IP 流量，q 退出。',
                          epilog='''快速开始：
+  network-monitor                    实时查看默认网卡
+  network-monitor --last 15m         从启动前 15 分钟开始实时查看
   network-monitor monitor            开始采集，Ctrl+C 停止
   network-monitor stats              查看今天的统计与趋势
   network-monitor install --user     安装为当前用户的后台服务
@@ -50,7 +54,9 @@ def build_parser():
     add_config_argument(parser)
     parser.add_argument('--version', action='version', version='%(prog)s ' + __version__,
                         help='显示版本号并退出')
-    commands = parser.add_subparsers(dest='command', required=True, title='可用命令',
+    stats.configure_parser(parser, live_only=True)
+    parser.set_defaults(handler=stats.run, command_parser=parser)
+    commands = parser.add_subparsers(dest='command', prog=parser.prog, title='可用命令',
                                      metavar='<命令>', parser_class=make_parser)
     command_parsers = {}
     for name, module, description in (
@@ -68,18 +74,19 @@ def build_parser():
 
 
 def main(argv=None):
-    parser, command_parsers = build_parser()
+    parser, _ = build_parser()
     args = parser.parse_args(argv)
     try:
         defaults, config_path = configuration.load(args.config)
     except ValueError as error:
         parser.error(str(error))
-    command = command_parsers[args.command]
-    if args.command == 'install':
+    command = args.command_parser
+    section = args.command or 'stats'
+    if section == 'install':
         command.set_defaults(**defaults.get('monitor', {}))
-    if args.command == 'stats' and 'database' in defaults.get('monitor', {}):
+    if section == 'stats' and 'database' in defaults.get('monitor', {}):
         command.set_defaults(database=defaults['monitor']['database'])
-    command.set_defaults(**defaults.get(args.command, {}))
+    command.set_defaults(**defaults.get(section, {}))
     args = parser.parse_args(argv)
     args.config_path = config_path
     args.config_defaults = defaults

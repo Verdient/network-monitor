@@ -12,7 +12,8 @@ SCHEMA = {
 }
 
 CLI_ONLY = {'monitor': {'count'},
-            'stats': {'start', 'end', 'database', 'interface', 'no_chart', 'width', 'height'}}
+            'stats': {'start', 'end', 'last', 'database', 'interface', 'no_chart', 'width', 'height',
+                      'dashboard', 'plain', 'live', 'interval'}}
 
 
 def search_paths():

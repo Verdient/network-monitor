@@ -1,5 +1,12 @@
 # 更新日志
 
+## [0.3.0](https://github.com/Verdient/network-monitor/releases/tag/v0.3.0) - 2026-11-21
+
+- 直接运行 `network-monitor` 即可打开实时仪表盘。使用 `network-monitor stats` 查询历史统计。
+- 实时趋势结合 SQLite 历史和当前会话采样。上传、下载使用各自的纵轴，终端缩放时自动调整布局。
+- 按 `c` 查看本机 TCP 连接。按 `i` 查看所选网卡各对端 IP 的实时速率和累计流量，IP 页需要 `tcpdump` 和抓包权限。
+- 按 `+` 延长刷新间隔，按 `-` 缩短刷新间隔，每次调整 0.1 秒，最短为 0.1 秒。也可通过 `--interval` 指定初始间隔。
+
 ## [0.2.2](https://github.com/Verdient/network-monitor/releases/tag/v0.2.2) - 2026-11-20
 
 - 修复 Linux 的 `.deb` 版本每次启动都解包运行时造成的延迟。帮助、版本查询和统计直接加载安装好的运行时。

@@ -114,6 +114,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+          fetch-tags: true
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -137,6 +138,16 @@ jobs:
           from pathlib import Path
           tag = os.environ['RELEASE_TAG']
           notes = Path('release-notes.md')
+          version = tag.removeprefix('v')
+          files = [
+              Path('assets') / f'network-monitor-{version}-macos-{arch}.tar.gz'
+              for arch in ('arm64', 'x86_64')
+          ] + [
+              Path('assets') / f'network-monitor_{version}-1_{arch}.deb'
+              for arch in ('amd64', 'arm64')
+          ] + [Path('formula/SHA256SUMS'), Path('formula/network-monitor.rb')]
+          if any(not path.is_file() or not path.stat().st_size for path in files):
+              raise SystemExit('发布产物不完整')
           existing = subprocess.run(['gh', 'release', 'view', tag, '--json', 'isDraft'],
                                     capture_output=True, text=True)
           if existing.returncode == 0:
@@ -147,7 +158,10 @@ jobs:
           else:
               subprocess.run(['gh', 'release', 'create', tag, '--draft', '--verify-tag',
                               '--title', tag, '--notes-file', str(notes)], check=True)
-          files = sorted(Path('assets').glob('*.tar.gz')) + sorted(Path('assets').glob('*.deb'))
-          files += [Path('formula/SHA256SUMS'), Path('formula/network-monitor.rb')]
           subprocess.run(['gh', 'release', 'upload', tag, '--clobber', *map(str, files)], check=True)
+          publish = subprocess.check_output([
+              'git', 'for-each-ref', '--format=%(trailers:key=Publish-Release,valueonly)', f'refs/tags/{tag}'
+          ], text=True).strip()
+          if publish == 'yes':
+              subprocess.run(['gh', 'release', 'edit', tag, '--draft=false', '--latest'], check=True)
           PY

@@ -59,16 +59,25 @@ class CommandTests(unittest.TestCase):
                 self.assertIn('usage: network-monitor', result.stdout)
                 self.assertIn('命令行 > 配置文件 > 内置默认值', result.stdout)
                 self.assertIn('示例' if command else '快速开始', result.stdout)
+                if not command:
+                    self.assertIn('--interval', result.stdout)
+                    self.assertIn('--last', result.stdout)
+                    self.assertNotIn('--live', result.stdout)
+                    self.assertNotIn('--plain', result.stdout)
+                elif command == ('stats',):
+                    self.assertIn('--live', result.stdout)
 
     def test_help_survives_bad_configuration(self):
         self.config('invalid', 'network-monitor.ini')
         self.assertEqual(self.invoke('stats', '-c', 'network-monitor.ini', '-h').returncode, 0)
 
-    def test_command_required_and_unknown_command_rejected(self):
-        for arguments in ((), ('unknown',)):
-            result = self.invoke(*arguments)
-            self.assertEqual(result.returncode, 2)
-            self.assertNotIn('Traceback', result.stderr)
+    def test_default_live_requires_a_terminal_and_unknown_commands_are_rejected(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('实时仪表盘需要交互式终端', result.stderr)
+        result = self.invoke('unknown')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('unknown', result.stderr)
 
     def test_config_path_before_and_after_command(self):
         self.samples()
@@ -138,6 +147,8 @@ class CommandTests(unittest.TestCase):
         result = self.invoke('stats', '-d', 'missing.db', '-i', 'eth0')
         self.assertEqual(result.returncode, 1)
         self.assertIn('missing.db', result.stderr)
+        self.assertIn('monitor 采集数据', result.stderr)
+        self.assertIn('stats -d', result.stderr)
         self.assertFalse((self.cwd / 'missing.db').exists())
 
     def test_stats_weighted_averages_and_chart(self):
@@ -150,6 +161,38 @@ class CommandTests(unittest.TestCase):
         result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--width', '20', '--height', '3')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('网速趋势', result.stdout)
+
+    def test_dashboard_displays_metrics_without_color_when_redirected(self):
+        self.samples()
+        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--dashboard')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('NETWORK MONITOR', result.stdout)
+        self.assertIn('采样  2 次', result.stdout)
+        self.assertIn('↓ 下载', result.stdout)
+        self.assertIn('↑ 上传', result.stdout)
+        self.assertIn('网速趋势', result.stdout)
+        self.assertNotIn('\033', result.stdout)
+        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--dashboard', '--no-chart')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('网速趋势', result.stdout)
+
+    def test_recent_window_only_includes_recent_samples(self):
+        now = int(time.time())
+        writer = storage.Writer(self.cwd / 'recent.db')
+        try:
+            writer.write(now - 3600, 1, {'eth0': (1, 2)})
+            writer.write(now - 5, 1, {'eth0': (1000, 2000)})
+        finally:
+            writer.close()
+        result = self.invoke('stats', '-d', 'recent.db', '-i', 'eth0', '--last', '15m', '--plain', '--no-chart')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('采样：1 次', result.stdout)
+        self.assertIn('2.00 KB', result.stdout)
+        self.assertNotIn('NETWORK MONITOR', result.stdout)
+        for options in (('--last', '0m'), ('--last', '15m', '--end', str(now)), ('--live',)):
+            with self.subTest(options=options):
+                result = self.invoke('stats', *options)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
 
     def test_stats_defaults_to_system_timezone_and_today(self):
         self.env['TZ'] = 'Asia/Tokyo'

@@ -1,7 +1,10 @@
 """Shared command-line presentation."""
 
 import argparse
+import os
+import re
 import shutil
+import sys
 import configuration
 
 
@@ -18,9 +21,30 @@ class HelpFormatter(argparse.RawDescriptionHelpFormatter):
         return text
 
 
+class CommandParser(argparse.ArgumentParser):
+    def print_help(self, file=None):
+        output = sys.stdout if file is None else file
+        if not output.isatty() or os.environ.get('TERM') == 'dumb':
+            return super().print_help(output)
+        color = 'NO_COLOR' not in os.environ
+
+        def accent(label, code):
+            return '\033[{}m{}\033[0m'.format(code, label) if color else label
+
+        lines = [accent(' NETWORK ', '1;30;46') + accent(' MONITOR ', '1;30;45')
+                 + accent('╲╲', '1;35'), '']
+        for line in self.format_help().splitlines():
+            if line and not line[0].isspace() and line.endswith((':', '：')):
+                line = accent('╸ ' + line, '1;36')
+            elif line.lstrip().startswith('-'):
+                line = re.sub(r'^(\s+)(-\S.*?)(?=  |$)', lambda m: m[1] + accent(m[2], '1;35'), line)
+            lines.append(line)
+        print('\n'.join(lines), file=output)
+
+
 def make_parser(*args, **kwargs):
-    parser = argparse.ArgumentParser(*args, formatter_class=HelpFormatter,
-                                     add_help=False, allow_abbrev=False, **kwargs)
+    parser = CommandParser(*args, formatter_class=HelpFormatter,
+                           add_help=False, allow_abbrev=False, **kwargs)
     parser._positionals.title = '位置参数'
     parser._optionals.title = '通用选项'
     parser.add_argument('-h', '--help', action='help', help='显示帮助并退出')
