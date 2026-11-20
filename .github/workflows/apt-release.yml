@@ -2,7 +2,7 @@ name: 同步 Release 到 APT 源
 
 on:
   workflow_run:
-    workflows: [发布 APT 软件源, Release]
+    workflows: [发布 APT 软件源, Release, 发布已验收的 Release]
     types: [completed]
 
 permissions: {}
@@ -11,7 +11,10 @@ jobs:
   publish:
     if: >-
       github.event.workflow_run.event == 'release' ||
-      (github.event.workflow_run.name == 'Release' && github.event.workflow_run.conclusion == 'success')
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.name == 'Release' ||
+        (github.event.workflow_run.name == '发布已验收的 Release' &&
+         startsWith(github.event.workflow_run.head_branch, 'publish/v'))))
     permissions:
       contents: read
       pages: write
