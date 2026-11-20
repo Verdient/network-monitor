@@ -1,5 +1,9 @@
 # 更新日志
 
+## [0.2.2](https://github.com/Verdient/network-monitor/releases/tag/v0.2.2) - 2026-11-20
+
+- 修复 Linux 的 `.deb` 版本每次启动都解包运行时造成的延迟。帮助、版本查询和统计直接加载安装好的运行时。
+
 ## [0.2.1](https://github.com/Verdient/network-monitor/releases/tag/v0.2.1) - 2026-11-20
 
 - 修复 macOS 命令启动缓慢的问题，帮助、版本查询和采集统计直接使用已安装的 Python 运行时。

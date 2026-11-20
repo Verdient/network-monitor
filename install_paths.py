@@ -11,11 +11,11 @@ RUNTIME_DIRECTORY = 'network-monitor-runtime'
 
 
 def bundled_runtime(executable):
-    extracted = getattr(sys, '_MEIPASS', None)
-    if platform.system() != 'Darwin' or extracted is None:
+    runtime_path = getattr(sys, '_MEIPASS', None)
+    if runtime_path is None:
         return None
     runtime = executable.resolve().parent / RUNTIME_DIRECTORY
-    if runtime.is_dir() and runtime == Path(extracted).resolve():
+    if runtime.is_dir() and runtime == Path(runtime_path).resolve():
         return runtime
     return None
 

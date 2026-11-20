@@ -42,14 +42,23 @@ jobs:
             python -m pip install -r requirements-build.txt
             python scripts/test.py
             python -m PyInstaller --clean --noconfirm network-monitor.spec
-            NETWORK_MONITOR_BINARY=/work/dist/network-monitor python scripts/test.py
+            NETWORK_MONITOR_BINARY=/work/dist/network-monitor/network-monitor python scripts/test.py
             python scripts/release.py deb
           '
           sudo chown -R "$(id -u):$(id -g)" build dist release
       - name: 在无 Python 的 Debian 11 中验证安装和采集
         run: python3 scripts/ci_run.py docker run --rm -v "$PWD:/work:ro" -w /tmp debian:bullseye sh /work/scripts/test_deb_container.sh
-      - name: 验证 systemd 服务以及安装、升级和卸载
-        run: python3 scripts/ci_run.py sudo --preserve-env=GITHUB_ACTIONS python3 scripts/test_deb.py release/*.deb
+      - name: 下载使用单文件打包的旧版安装包
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_PACKAGE: network-monitor_0.2.1-1_${{ matrix.architecture }}.deb
+        run: |
+          gh release download v0.2.1 --repo Verdient/network-monitor --dir "$RUNNER_TEMP/previous-deb" \
+            --pattern "$OLD_PACKAGE" --pattern SHA256SUMS
+          cd "$RUNNER_TEMP/previous-deb"
+          awk -v package="$OLD_PACKAGE" '$2 == package' SHA256SUMS | sha256sum --check
+      - name: 验证 systemd 服务以及从旧版升级和卸载
+        run: python3 scripts/ci_run.py sudo --preserve-env=GITHUB_ACTIONS python3 scripts/test_deb.py release/*.deb "$RUNNER_TEMP"/previous-deb/*.deb
       - uses: actions/upload-artifact@v5
         with:
           name: linux-${{ matrix.architecture }}

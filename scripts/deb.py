@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 
 from scripts.release import ROOT, check_version, third_party_notices
+from install_paths import RUNTIME_DIRECTORY
 
 
 ARCHITECTURES = {'x86_64': ('amd64', 62), 'aarch64': ('arm64', 183), 'arm64': ('arm64', 183)}
@@ -29,6 +30,9 @@ def build(binary, output, version):
         header = file.read(20)
     if len(header) < 20 or header[:6] != b'\x7fELF\x02\x01' or struct.unpack('<H', header[18:20])[0] != machine:
         raise ValueError('二进制文件必须是与构建机器架构一致的 64 位 Linux ELF 文件')
+    runtime = binary.parent / RUNTIME_DIRECTORY
+    if not runtime.is_dir():
+        raise ValueError('找不到 Linux 运行时目录: ' + str(runtime))
     libc, libc_version = platform.libc_ver()
     if libc != 'glibc' or not libc_version:
         raise ValueError('deb 安装包需要使用 glibc 的构建环境')
@@ -50,6 +54,7 @@ def build(binary, output, version):
         program.parent.mkdir(parents=True)
         shutil.copyfile(binary, program)
         program.chmod(0o755)
+        shutil.copytree(runtime, program.parent / RUNTIME_DIRECTORY, symlinks=True)
         write('usr/lib/network-monitor/debian-package', 'network-monitor\n')
         (package / 'usr/bin').mkdir(parents=True)
         (package / 'usr/bin/network-monitor').symlink_to('../lib/network-monitor/network-monitor')

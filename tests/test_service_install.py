@@ -150,8 +150,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(plan.executable.read_bytes(), source.read_bytes())
         self.assertEqual(plan.executable.stat().st_mode & 0o777, 0o755)
 
-    def test_macos_bundle_install_preserves_runtime_and_symlinks(self):
-        plan = self.plan('Darwin', '--user')
+    def test_bundle_install_preserves_runtime_and_symlinks(self):
         source = self.root / 'network-monitor'
         source.write_bytes(b'executable')
         source.chmod(0o755)
@@ -159,16 +158,18 @@ class ServiceTests(unittest.TestCase):
         runtime.mkdir()
         (runtime / 'library').write_bytes(b'runtime')
         (runtime / 'linked-library').symlink_to('library')
-        with patch('install_paths.platform.system', return_value='Darwin'), \
-                patch('service_install.sys.frozen', True, create=True), \
-                patch('service_install.sys.executable', str(source)), \
-                patch('service_install.sys._MEIPASS', str(runtime), create=True):
-            service_install.install_program(plan)
-        installed_runtime = plan.executable.resolve().parent / install_paths.RUNTIME_DIRECTORY
-        self.assertTrue(plan.executable.is_symlink())
-        self.assertEqual(plan.executable.read_bytes(), b'executable')
-        self.assertEqual((installed_runtime / 'linked-library').readlink(), Path('library'))
-        self.assertEqual((installed_runtime / 'linked-library').read_bytes(), b'runtime')
+        for system in ('Darwin', 'Linux'):
+            with self.subTest(system=system):
+                plan = self.plan(system, '--user')
+                with patch('service_install.sys.frozen', True, create=True), \
+                        patch('service_install.sys.executable', str(source)), \
+                        patch('service_install.sys._MEIPASS', str(runtime), create=True):
+                    service_install.install_program(plan)
+                installed_runtime = plan.executable.resolve().parent / install_paths.RUNTIME_DIRECTORY
+                self.assertTrue(plan.executable.is_symlink())
+                self.assertEqual(plan.executable.read_bytes(), b'executable')
+                self.assertEqual((installed_runtime / 'linked-library').readlink(), Path('library'))
+                self.assertEqual((installed_runtime / 'linked-library').read_bytes(), b'runtime')
 
 
 if __name__ == '__main__':

@@ -113,7 +113,7 @@ def main():
     bundle.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor/network-monitor')
     bundle.add_argument('--output', type=Path, default=ROOT / 'release')
     deb = commands.add_parser('deb', help='构建 Linux deb 安装包')
-    deb.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor')
+    deb.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor/network-monitor')
     deb.add_argument('--output', type=Path, default=ROOT / 'release')
     formula = commands.add_parser('formula')
     formula.add_argument('--assets', type=Path, required=True)

@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts import deb
+from install_paths import RUNTIME_DIRECTORY
 from version import __version__
 
 
@@ -23,6 +24,10 @@ class DebianPackageTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.binary = self.root / 'network-monitor'
         self.elf(62)
+        self.runtime = self.root / RUNTIME_DIRECTORY
+        self.runtime.mkdir()
+        (self.runtime / 'library.so.1').write_bytes(b'runtime library')
+        (self.runtime / 'library.so').symlink_to('library.so.1')
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch('scripts.deb.platform.machine', return_value='x86_64'))
@@ -51,6 +56,10 @@ class DebianPackageTests(unittest.TestCase):
         self.assertTrue(binary.is_symlink())
         self.assertEqual(binary.read_bytes(), self.binary.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+        runtime = binary.resolve().parent / RUNTIME_DIRECTORY
+        link = runtime / 'library.so'
+        self.assertEqual(link.readlink(), Path('library.so.1'))
+        self.assertEqual(link.read_bytes(), b'runtime library')
         self.assertTrue((extracted / 'usr/lib/network-monitor/debian-package').is_file())
         self.assertEqual((extracted / 'DEBIAN/conffiles').read_text(), '/etc/network-monitor/config.ini\n')
         config = configparser.ConfigParser()
@@ -90,6 +99,11 @@ class DebianPackageTests(unittest.TestCase):
         self.elf(62)
         self.binary.chmod(0o644)
         with self.assertRaisesRegex(ValueError, '可执行'):
+            self.build()
+
+    def test_rejects_bundle_without_the_runtime(self):
+        self.runtime.rename(self.root / 'unavailable')
+        with self.assertRaisesRegex(ValueError, '运行时目录'):
             self.build()
 
 
