@@ -1,0 +1,52 @@
+name: 发布已验收的 Release
+
+on:
+  push:
+    branches: [publish/v0.3.0]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: "44780530773"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.3.0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 验证原始发布构建
+        run: |
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .head_sha)" = "$(git rev-parse HEAD)"
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs" | python -c '
+          import json
+          import sys
+          jobs = json.load(sys.stdin)["jobs"]
+          tested = [job for job in jobs if job["name"].startswith(("build (", "deb / build (", "brew-test ("))]
+          assert len(tested) == 6 and all(job["conclusion"] == "success" for job in tested)
+          '
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.BUILD_RUN }}
+          path: assets
+          merge-multiple: true
+      - name: 检查产物并发布
+        run: |
+          python scripts/release.py formula --assets assets --output formula
+          python scripts/release.py notes
+          test "$(wc -l < formula/SHA256SUMS)" -eq 4
+          cd assets
+          sha256sum -c ../formula/SHA256SUMS
+          cd ..
+          gh release create v0.3.0 --verify-tag --draft --title v0.3.0 --notes-file release-notes.md
+          gh release upload v0.3.0 assets/*.tar.gz assets/*.deb formula/SHA256SUMS formula/network-monitor.rb
+          gh release edit v0.3.0 --draft=false --latest
