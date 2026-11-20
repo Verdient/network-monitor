@@ -1,0 +1,19 @@
+name: 同步 Release 到 APT 源
+
+on:
+  workflow_run:
+    workflows: [发布 APT 软件源]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  publish:
+    if: github.event.workflow_run.event == 'release'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/apt.yml
+    secrets:
+      APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}

@@ -11,16 +11,22 @@ on:
   release:
     types: [published, edited, deleted]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      APT_SIGNING_KEY:
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: apt-pages
+  group: apt-pages-${{ github.event_name == 'release' && 'release' || 'deploy' }}
   cancel-in-progress: false
 
 jobs:
   build:
+    # Release runs use tag refs. The workflow_run listener deploys from main.
+    if: github.event_name != 'release'
     runs-on: ubuntu-24.04
     outputs:
       ready: ${{ steps.signing.outputs.available }}
