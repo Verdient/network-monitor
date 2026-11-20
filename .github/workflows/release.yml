@@ -53,7 +53,7 @@ jobs:
         run: python -m PyInstaller --clean --noconfirm network-monitor.spec
       - name: Test standalone executable
         env:
-          NETWORK_MONITOR_BINARY: dist/network-monitor
+          NETWORK_MONITOR_BINARY: dist/network-monitor/network-monitor
         run: python scripts/test.py
       - name: Create release archive
         run: python scripts/release.py archive

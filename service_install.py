@@ -184,7 +184,25 @@ def install_program(plan):
     if plan.source is not None or getattr(sys, 'frozen', False):
         source = plan.source or Path(sys.executable)
         if source.resolve() != plan.executable.resolve():
-            atomic_write(plan.executable, source.read_bytes(), 0o755)
+            runtime = install_paths.bundled_runtime(source)
+            if runtime is None:
+                atomic_write(plan.executable, source.read_bytes(), 0o755)
+            else:
+                bundle_root = plan.executable.parent / '.network-monitor-bundles'
+                bundle_root.mkdir(parents=True, exist_ok=True)
+                bundle = Path(tempfile.mkdtemp(dir=bundle_root))
+                try:
+                    shutil.copytree(runtime, bundle / runtime.name, symlinks=True)
+                    binary = bundle / source.name
+                    shutil.copy2(source, binary)
+                    bundle.chmod(0o755)
+                    with tempfile.TemporaryDirectory(dir=plan.executable.parent) as staging:
+                        link = Path(staging) / plan.executable.name
+                        link.symlink_to(binary.relative_to(plan.executable.parent))
+                        link.replace(plan.executable)
+                except BaseException:
+                    shutil.rmtree(bundle)
+                    raise
     else:
         app = plan.work_dir / 'app'
         for name in SOURCE_FILES:

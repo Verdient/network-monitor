@@ -20,6 +20,9 @@ class ReleaseTests(unittest.TestCase):
         for architecture in ('arm64', 'x86_64'):
             path = self.root / 'network-monitor-{}-macos-{}.tar.gz'.format(__version__, architecture)
             with tarfile.open(path, 'w:gz') as package:
+                runtime = tarfile.TarInfo(release.RUNTIME_DIRECTORY)
+                runtime.type = tarfile.DIRTYPE
+                package.addfile(runtime)
                 for name in ('network-monitor', 'LICENSE', 'THIRD_PARTY_NOTICES.txt'):
                     if name == omit:
                         continue
@@ -109,6 +112,10 @@ class ReleaseTests(unittest.TestCase):
         binary = self.root / 'program'
         binary.write_bytes(b'binary')
         binary.chmod(0o755)
+        runtime = self.root / release.RUNTIME_DIRECTORY
+        runtime.mkdir()
+        (runtime / 'library').write_bytes(b'runtime')
+        (runtime / 'linked-library').symlink_to('library')
         with patch('scripts.release.platform.system', return_value='Darwin'), \
                 patch('scripts.release.platform.machine', return_value='arm64'), \
                 patch('scripts.release.third_party_notices', return_value='runtime licenses'), \
@@ -117,8 +124,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(archive.name, 'network-monitor-{}-macos-arm64.tar.gz'.format(__version__))
         with tarfile.open(archive) as package:
             self.assertEqual(set(package.getnames()), {'network-monitor', 'LICENSE', 'README.md',
-                                                       'network-monitor.example.ini', 'THIRD_PARTY_NOTICES.txt'})
+                                                       'network-monitor.example.ini', 'THIRD_PARTY_NOTICES.txt',
+                                                       release.RUNTIME_DIRECTORY, f'{release.RUNTIME_DIRECTORY}/library',
+                                                       f'{release.RUNTIME_DIRECTORY}/linked-library'})
             self.assertEqual(package.extractfile('network-monitor').read(), b'binary')
+            self.assertEqual(package.extractfile(f'{release.RUNTIME_DIRECTORY}/library').read(), b'runtime')
+            self.assertEqual(package.getmember(f'{release.RUNTIME_DIRECTORY}/linked-library').linkname, 'library')
             self.assertEqual(package.extractfile('THIRD_PARTY_NOTICES.txt').read(), b'runtime licenses')
 
     def test_archive_refuses_to_label_linux_binary_as_macos(self):

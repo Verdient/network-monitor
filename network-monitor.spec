@@ -1,4 +1,5 @@
 # Build with: python -m PyInstaller --clean --noconfirm network-monitor.spec
+import sys
 
 a = Analysis(
     ['network_monitor.py'],
@@ -13,15 +14,21 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
+macos = sys.platform == 'darwin'
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [] if macos else a.binaries,
+    [] if macos else a.datas,
     [],
     name='network-monitor',
     debug=False,
     strip=False,
     upx=False,
     console=True,
+    exclude_binaries=macos,
+    contents_directory='network-monitor-runtime',
 )
+
+if macos:
+    bundle = COLLECT(exe, a.binaries, a.datas, name='network-monitor')

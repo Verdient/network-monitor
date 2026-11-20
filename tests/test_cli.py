@@ -162,7 +162,8 @@ class CommandTests(unittest.TestCase):
                 writer.write(stamp, 1, {'eth0': (100, 200)})
         finally:
             writer.close()
-        result = self.invoke('stats', '-i', 'eth0', '--no-chart')
+        config = self.config('', 'empty.ini')
+        result = self.invoke('stats', '-c', config, '-i', 'eth0', '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('采样：1 次', result.stdout)
         self.assertIn('+0900', result.stdout)

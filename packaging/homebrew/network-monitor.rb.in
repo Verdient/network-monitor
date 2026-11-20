@@ -18,7 +18,7 @@ class NetworkMonitor < Formula
   end
 
   def install
-    libexec.install "network-monitor"
+    libexec.install "network-monitor", "network-monitor-runtime"
     (libexec/"homebrew-prefix").write "#{HOMEBREW_PREFIX}\n"
     bin.write_exec_script libexec/"network-monitor"
 

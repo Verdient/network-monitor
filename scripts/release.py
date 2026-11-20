@@ -15,6 +15,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from version import __version__
+from install_paths import RUNTIME_DIRECTORY
 
 
 def check_version(version):
@@ -47,6 +48,9 @@ def archive(binary, output, version):
         raise ValueError('不支持的 CPU 架构')
     if not binary.is_file():
         raise ValueError('找不到二进制: ' + str(binary))
+    runtime = binary.parent / RUNTIME_DIRECTORY
+    if not runtime.is_dir():
+        raise ValueError('找不到 macOS 运行时目录: ' + str(runtime))
     output.mkdir(parents=True, exist_ok=True)
     # Include the licenses of components embedded by PyInstaller.
     notices = output / 'THIRD_PARTY_NOTICES.txt'
@@ -54,6 +58,7 @@ def archive(binary, output, version):
     destination = output / 'network-monitor-{}-macos-{}.tar.gz'.format(version, architecture)
     with tarfile.open(destination, 'w:gz') as package:
         package.add(binary, arcname='network-monitor')
+        package.add(runtime, arcname=RUNTIME_DIRECTORY)
         for name in ('README.md', 'LICENSE', 'network-monitor.example.ini'):
             package.add(ROOT / name, arcname=name)
         package.add(notices, arcname=notices.name)
@@ -72,6 +77,8 @@ def generate_formula(assets, output, version):
             for name in ('network-monitor', 'LICENSE', 'THIRD_PARTY_NOTICES.txt'):
                 if name not in members or not members[name].isfile():
                     raise ValueError('发布包缺少必要文件: ' + name)
+            if RUNTIME_DIRECTORY not in members or not members[RUNTIME_DIRECTORY].isdir():
+                raise ValueError('发布包缺少 macOS 运行时目录: ' + RUNTIME_DIRECTORY)
             if not members['network-monitor'].mode & 0o111:
                 raise ValueError('发布包中的二进制没有执行权限')
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -103,7 +110,7 @@ def main():
     parser.add_argument('--version', default=__version__)
     commands = parser.add_subparsers(dest='command', required=True)
     bundle = commands.add_parser('archive')
-    bundle.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor')
+    bundle.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor/network-monitor')
     bundle.add_argument('--output', type=Path, default=ROOT / 'release')
     deb = commands.add_parser('deb', help='构建 Linux deb 安装包')
     deb.add_argument('--binary', type=Path, default=ROOT / 'dist/network-monitor')

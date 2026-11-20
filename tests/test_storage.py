@@ -2,6 +2,7 @@ import contextlib
 import datetime as dt
 import io
 import os
+import platform
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -98,7 +99,8 @@ class StorageTests(unittest.TestCase):
                 connection.execute('DELETE FROM partitions')
         self.assertEqual(self.summary('eth0').count, 2)
 
-    @unittest.skipIf(os.geteuid() == 0, 'root 不受目录写权限限制')
+    @unittest.skipUnless(platform.system() == 'Linux' and os.geteuid() != 0,
+                         '此测试验证 Linux SQLite 需要写权限时的回退行为')
     def test_unprivileged_reader_can_query_stopped_service_database(self):
         import fcntl
         self.writer.write(BASE, 1, {'eth0': (10, 20)})

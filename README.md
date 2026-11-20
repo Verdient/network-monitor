@@ -10,7 +10,7 @@
 | macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor-0.2.0-macos-x86_64.tar.gz) |
 | Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/network-monitor_0.2.0-1_arm64.deb) |
 
-macOS 的 tar.gz 下载包解压后即可运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。
+macOS 的 tar.gz 下载包解压后，运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。请把 `network-monitor-runtime` 目录与可执行文件保留在同一目录。
 Linux 下载 deb 安装包后，按下面的步骤安装。
 可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.2.0/SHA256SUMS) 校验下载文件。
 

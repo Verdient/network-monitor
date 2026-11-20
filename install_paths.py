@@ -7,6 +7,19 @@ import platform
 import sys
 
 
+RUNTIME_DIRECTORY = 'network-monitor-runtime'
+
+
+def bundled_runtime(executable):
+    extracted = getattr(sys, '_MEIPASS', None)
+    if platform.system() != 'Darwin' or extracted is None:
+        return None
+    runtime = executable.resolve().parent / RUNTIME_DIRECTORY
+    if runtime.is_dir() and runtime == Path(extracted).resolve():
+        return runtime
+    return None
+
+
 def homebrew_prefix():
     if not getattr(sys, 'frozen', False):
         return None

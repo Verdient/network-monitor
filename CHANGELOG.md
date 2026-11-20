@@ -1,5 +1,9 @@
 # 更新日志
 
+## [0.2.1](https://github.com/Verdient/network-monitor/releases/tag/v0.2.1) - 2026-11-20
+
+- 修复 macOS 命令启动缓慢的问题，帮助、版本查询和采集统计直接使用已安装的 Python 运行时。
+
 ## [0.2.0](https://github.com/Verdient/network-monitor/releases/tag/v0.2.0) - 2026-11-19
 
 - 新增 Linux amd64 和 arm64 的 deb 安装包，支持 Debian 11+、Ubuntu 20.04+，无需安装 Python。
