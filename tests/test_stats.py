@@ -38,6 +38,54 @@ class HistoricalDashboardTests(unittest.TestCase):
 
 
 class LiveUpdateTests(unittest.TestCase):
+    def test_six_local_ips_fit_on_one_page_and_keep_stable_positions(self):
+        addresses = ['192.0.2.2', '192.0.2.4', '192.0.2.8', '192.0.2.10', '192.0.2.11',
+                     '2001:db8:1234:5678:9abc:def0:1234:5678']
+        capture = SimpleNamespace(interface='eth0', status='', ready=True,
+                                  local_rows=[PeerTraffic(ip, 500, 0, n, 0) for n, ip in enumerate(addresses)])
+        for width, rows in ((80, 24), (60, 18)):
+            display = Dashboard(width)
+            first = display.ip_screen(capture, rows, 0, view='ip-local')
+            capture.local_rows.reverse()
+            self.assertEqual(display.ip_screen(capture, rows, 0, view='ip-local'), first)
+            self.assertEqual(display.paging, (0, 1))
+            self.assertEqual([ip for ip in addresses[:-1]], sorted(addresses[:-1], key=first.index))
+            self.assertIn('2001:db8:', first)
+            self.assertTrue(all(display_width(line) <= width for line in first.splitlines()))
+
+    def test_tcp_address_shortcuts_and_clicks_keep_the_selected_identity(self):
+        addresses = [('tcp-address', None, '192.0.2.2'), ('tcp-address', (1, 99), '192.0.2.2')]
+        def frame(size, collect, view, page, sort, theme, selected):
+            targets = [(1, 0, 10, addresses[0]), (2, 0, 10, addresses[1])]
+            return '\n' * 23, float('inf'), targets if not selected else [], (page, 2)
+        render = Mock(side_effect=frame)
+        with patch('stats.sys.stdin.fileno', return_value=1), patch('stats.sys.stdout', StringIO()), \
+                patch('stats.enter_cbreak'), patch('stats.terminal_size', return_value=os.terminal_size((80, 24))), \
+                patch('select.select', return_value=([1], [], [])), \
+                patch('stats.os.read', side_effect=[b'c', b'n', b'2', b'n', b'b', b'\x1b[<0;1;2M', b'q']):
+            run_live(render, Event(), Mock())
+        self.assertEqual([(c.args[3], c.args[6]) for c in render.call_args_list],
+                         [(0, None), (0, None), (1, None), (0, addresses[1][1:]), (1, addresses[1][1:]),
+                          (1, None), (0, addresses[0][1:])])
+
+    def test_ip_readouts_share_and_sort_targets_follow_the_selected_mode(self):
+        capture = SimpleNamespace(interface='en0', status='', ready=True,
+                                  rows=[PeerTraffic('198.51.100.1', 9000, 3000, 4, 2)],
+                                  local_rows=[PeerTraffic('192.0.2.1', 3000, 2000, 2, 1),
+                                              PeerTraffic('2001:db8::1', 6000, 1000, 0, .001)])
+        for view, reading in (('ip', '4.00 Mbps'), ('ip-local', '2.00 Mbps')):
+            with self.subTest(view=view):
+                targets = []
+                lines = Dashboard(100).ip_screen(capture, 28, 0, ('up_mbps', True), targets,
+                                                  view=view).splitlines()
+                self.assertIn(reading, '\n'.join(lines[:6]))
+                row, left, right, _ = next(t for t in targets if t[3] == 'up_mbps')
+                cells = ''.join(c.ljust(display_width(c)) for c in lines[row])
+                self.assertIn('▾', cells[left:right])
+                self.assertEqual('双向速率对比' in '\n'.join(lines), view == 'ip-local')
+                if view == 'ip-local':
+                    self.assertIn('<1%', '\n'.join(lines))
+
     def test_ip_headings_cover_all_columns_and_rank_before_paging(self):
         peers = [PeerTraffic('192.0.2.10', 100, 400, 2, 9), PeerTraffic('192.0.2.2', 200, 300, 4, 3)]
         capture = SimpleNamespace(interface='en0', status='', rows=peers)
@@ -161,16 +209,17 @@ class LiveUpdateTests(unittest.TestCase):
             with self.subTest(hint=hint), patch.dict(os.environ, COLORFGBG=hint):
                 self.assertEqual(terminal_theme_hint(), expected)
 
-    def test_live_footer_click_targets_match_all_three_views(self):
+    def test_live_footer_click_targets_match_each_view(self):
         peers = tuple(('192.0.2.{}'.format(i), 1) for i in range(1, 20))
         capture = SimpleNamespace(interface='en0', status='', ready=True, rows=[PeerTraffic(addr, 100, 200, 1, 2)
-                                                                    for addr, _ in peers])
+                                                                    for addr, _ in peers],
+                                  local_rows=[PeerTraffic('192.0.2.100', 0, 0, 0, 0)])
         sampler = LiveSampler('en0')
         sampler.connections = Connections(19, peers=peers), ()
         options = SimpleNamespace(database=None, no_chart=True, width=None, height=None)
         report = Report('en0', None, 0, 10, storage.Summary())
         for width in (20, 44, 120):
-            for view in ('traffic', 'connections', 'ip'):
+            for view in ('traffic', 'connections', 'ip', 'ip-local'):
                 with self.subTest(width=width, view=view), patch.dict(os.environ, NO_COLOR='1'):
                     targets = []
                     screen = dashboard_text(options, 'en0', None, (0, 10), True, sampler,
@@ -179,6 +228,8 @@ class LiveUpdateTests(unittest.TestCase):
                     footer = ''.join(char.ljust(display_width(char)) for char in screen.splitlines()[-1])
                     buttons = {key: (left, right) for row, left, right, key in targets if row == 16}
                     expected = set('qci+-')
+                    if view in ('ip', 'ip-local'):
+                        expected.add('m')
                     if view == 'connections' and width >= 44:
                         expected.add('n')
                     self.assertEqual(expected, buttons.keys())
@@ -195,6 +246,16 @@ class LiveUpdateTests(unittest.TestCase):
                                          min(buttons[key][1] - buttons[key][0] for key in 'qci'))
                     if width == 120:
                         self.assertEqual((minus_right - minus_left, plus_right - plus_left), (3, 3))
+
+    def test_ip_mode_can_switch_by_mouse_and_keyboard(self):
+        render = Mock(return_value=('\n' * 23, float('inf'), [(23, 0, 1, 'm')], (0, 1)))
+        with patch('stats.sys.stdin.fileno', return_value=1), patch('stats.sys.stdout', StringIO()), \
+                patch('stats.enter_cbreak'), patch('stats.terminal_size', return_value=os.terminal_size((80, 24))), \
+                patch('select.select', return_value=([1], [], [])), \
+                patch('stats.os.read', side_effect=[b'i', b'\x1b[<0;1;24M', b'i', b'i', b'm', b'q']):
+            run_live(render, Event(), Mock())
+        self.assertEqual([call.args[2] for call in render.call_args_list],
+                         ['traffic', 'ip', 'ip-local', 'traffic', 'ip-local', 'ip'])
 
     def test_peer_paging_clamps_and_disables_boundary_buttons(self):
         peers = tuple(('192.0.2.{}'.format(i), 1) for i in range(1, 41))
@@ -671,7 +732,7 @@ class LiveSamplerTests(unittest.TestCase):
                     patch('stats.sys.stdout.isatty', return_value=True), \
                     patch.dict(os.environ, {'TERM': 'xterm'}), patch('stats.LiveSampler.sample') as sample, \
                     patch('stats.dashboard_text', return_value='frame') as render, \
-                    patch('stats.run_live') as live:
+                    patch('stats.run_live') as live, patch('tcp_connections.ConnectionReader.refresh'):
                 def run_frames(render_frame, changed, change_interval):
                     render_frame(os.terminal_size((100, 30)), True)
                     clock.return_value = 2000
@@ -691,7 +752,7 @@ class LiveSamplerTests(unittest.TestCase):
         with patch('stats.sys.stdin.isatty', return_value=True), patch('stats.sys.stdout.isatty', return_value=True), \
                 patch.dict(os.environ, {'TERM': 'xterm'}), patch('stats.LiveSampler.sample'), \
                 patch('stats.dashboard_text', return_value='frame') as display, patch('stats.run_live') as live, \
-                patch('ip_traffic.IPTraffic') as capture:
+                patch('ip_traffic.IPTraffic') as capture, patch('tcp_connections.ConnectionReader.refresh'):
             def run_frames(render_frame, changed, _change_interval):
                 render_frame(os.terminal_size((80, 24)), True)
                 capture.assert_not_called()

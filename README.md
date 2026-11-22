@@ -31,7 +31,7 @@ brew install Verdient/tap/network-monitor
 确认安装成功：
 
 ```bash
-network-monitor --version
+network-monitor -v  # 也可用 --version
 ```
 
 ### Linux：APT 软件源
@@ -68,6 +68,25 @@ sudo apt install './下载的文件名.deb'
 ```
 
 安装包包含独立可执行文件和 systemd 服务。使用 systemd 的系统会自动启动采集并设置开机启动。
+
+### Tab 补全
+
+Homebrew 和 deb 安装包会把补全脚本装到 Bash、Zsh 和 Fish 的标准目录。Shell 已启用补全加载时，打开新终端即可使用。也可以在当前终端手动启用，按使用的 Shell 选择一条命令。
+
+```bash
+# Bash
+source <(network-monitor completion bash)
+
+# Zsh（初始化补全后加载）
+autoload -Uz compinit && compinit
+source <(network-monitor completion zsh)
+```
+
+```fish
+network-monitor completion fish | source
+```
+
+输入 `network-monitor st` 后按 Tab 可补全为 `stats`。补全会随子命令和已输入的选项变化，也可提示配置和数据库路径、本机和历史网卡、时区、日期、时间跨度与流量汇总周期。
 
 ## 开始采集
 
@@ -115,13 +134,21 @@ network-monitor --last 15m --interval 0.5
 
 拉高实时窗口会增加波形的绘图行数，快捷键始终位于底部。按 `c` 切到本机 TCP 连接，再按一次回到所选网卡的流量。切换视图期间采样照常进行。
 
-连接页显示已建立、监听、TIME_WAIT 和其他状态的套接字数量。对端列表同时包含 IPv4 和 IPv6，按每个 IP 的已建立连接数排序。列表跨页时，按 `p` 上一页、`n` 下一页。连接数折线的纵轴上限取峰值的 1.25 倍并向上取整，图中标出峰值和采样时间。新采样从右侧进入，铺到左侧后按时间均分整个会话，每列保留该时段的最高连接数，最右列显示最新采样。Linux 汇总当前进程通过 `/proc` 能读取的网络命名空间，包括宿主机上可见的 Docker 容器。部分连接表读取失败时，连接页会标记「部分」。macOS 读取本机连接表。连接信息只保存在本次实时会话中。
+连接页按所选网卡的本地 IPv4、IPv6 地址显示出站和入站的已建立连接数。入站对端按 IP 去重。程序无需提权即可根据可见的握手状态、监听端口和临时端口范围判断方向，无法推断的连接标记为「方向未知」。有多个本地地址时，按 `c` 先打开地址总览，可逐行比较各 IP 的出站、入站连接和估计剩余端口。「目标最少剩余」取该地址所有已观测出站目标中最低的估计剩余量。按行首数字或点击地址打开该 IP 的目标明细，按 `b` 返回总览，按 `p` 或 `n` 翻页。
 
-窗口有足够空间且抓包成功时，实时主页在网速趋势下方显示 IP 流量表。按 `i` 可打开独立 IP 页，查看所选网卡上各对端 IPv4、IPv6 的下载速率、上传速率和双向累计流量。默认按当前双向速率之和排序。点击任一列表头按该列排序，再点一次切换升降序。点击 IP 流量框底部的「上页」或「下页」翻页，也可按 `p` 或 `n`。在独立页再按 `i` 返回。两处共用同一份采样，首次显示主页的 IP 表或打开独立 IP 页时开始计数，切换页面继续累计，退出时清除。流量按 IP 包长度计算，包含 IP 头。
+临时端口范围取自系统配置，Linux 会扣除保留端口。「独占估计剩余」按本地 IP 去重计算，用于观察需要先独占绑定源端口的应用。「新目标容量」表示当前本地 IP 连接一个全新的远端 `IP:端口` 时，按可用临时端口数估算的并发连接数。计算时扣除可见的冲突监听端口。普通 TCP 出站连接可以跨目标复用源端口，因此连向其他目标的连接数增加时，这个容量通常保持稳定。已有目标的「估计剩余」还会扣除当前仍占用同一连接组合的源端口，包括处于 `TIME_WAIT` 的连接。实际可用量还取决于应用的绑定方式、内核端口复用策略和应用资源限制。
 
-IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。IP、地域、运营商、AS 号和 DNS 反查域名按顺序显示，颜色逐级减淡。AS 号由地域数据源在同一请求中提供，例如 `AS45102`。地址栏空间不足时，附加信息放在下一行。
+本机汇总包含已建立、监听、`TIME_WAIT` 和其他 TCP 状态。Linux 汇总当前进程通过 `/proc` 能读取的网络命名空间，包括宿主机上可见的 Docker 容器。其他命名空间按地址单列，端口容量显示为未知。NAT 转换后的端口占用需要从执行 NAT 的设备获取。部分连接表读取失败时显示「部分」。连接信息只保存在本次实时会话中。
+
+窗口有足够空间且抓包成功时，实时主页在网速趋势下方显示 IP 流量表。按 `i` 打开独立 IP 页，按 `m` 或点击底部按钮，在「对端 IP」和「本机 IP」之间切换。两种模式各自显示每个 IPv4、IPv6 地址的下载速率、上传速率和双向累计流量。「本机 IP」列出当前网卡上的每个地址，无流量的地址显示为零。发往组播或广播地址的入站包按源地址计入「对端 IP」。
+
+对端 IP 默认按当前双向速率之和排序，本机 IP 默认按地址排序，方便持续观察同一个地址。点击任一列表头按该列排序，再点一次切换升降序。点击 IP 流量框底部的「上页」或「下页」翻页，也可按 `p` 或 `n`。在独立页再按 `i` 返回。两种模式共用一次抓包，首次显示主页的 IP 表或打开独立 IP 页时开始计数，切换时继续累计，退出时清除。流量按 IP 包长度计算，包含 IP 头。
+
+IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。「对端 IP」按顺序显示 IP、地域、运营商、AS 号和系统反查名称，颜色逐级减淡。AS 号由地域数据源在同一请求中提供，例如 `AS45102`。地址栏空间不足时，附加信息放在下一行。
 
 IPv4 私有网段、IPv6 唯一本地网段和链路本地地址直接标记为「局域网」。程序在后台通过 HTTPS 将当前页的公网对端 IP 发送给地域数据源，以查询地域和运营商。遇到限流、错误或信息不足时，按表中顺序尝试下一个来源。中国大陆 IP 有城市信息时显示为「杭州·浙江·中国」，缺少城市时显示为「浙江·中国」。直辖市和港澳台显示为「北京·中国」「香港·中国」「澳门·中国」「台湾·中国」等。美国 IP 显示为「山景城·加利福尼亚·美国」，缺少城市或州时逐级简化。其他国家显示中文国家名称。
+
+系统反查返回的 `_gateway` 显示为「默认网关」。已知组播地址会显示协议用途，例如 `ff02::16` 对应「MLDv2 路由器组播」，`ff02::1:2` 对应「DHCPv6 中继/服务器组播」。其他组播地址按 IP 版本标记为「IPv4 组播」或「IPv6 组播」。
 
 中国大陆和美国的常见城市按省或州匹配本地别名。例如，`San Francisco` 和「三藩市」都显示为「旧金山」。地域和运营商的繁体中文通过内置 OpenCC 词典转成简体，已有缓存也会在读取时转换。[城市映射表](https://github.com/Verdient/network-monitor/blob/main/geo_data/cities.zh.json) · [OpenCC 1.1.9](https://github.com/BYVoid/OpenCC/tree/ver.1.1.9) · [OpenCC 许可证](https://github.com/Verdient/network-monitor/blob/main/geo_data/opencc/LICENSE)
 
@@ -235,13 +262,7 @@ timezone = Asia/Shanghai
 - `timezone`：统计使用的时区；不设置时使用系统时区。
 - `database`：数据保存路径。修改它后，新数据将写入新位置。
 
-保存后重启服务使采集配置生效：
-
-```bash
-brew services restart network-monitor
-```
-
-Linux 使用 `sudo systemctl restart network-monitor`。如果修改数据库位置，需要让 `network-monitor` 服务用户对新目录具有读写权限。
+保存后按[服务管理](#服务管理)中的对应命令重启采集。如果修改数据库位置，需要让运行采集服务的用户对新目录具有读写权限。
 
 也可以临时指定配置文件或覆盖参数：
 
@@ -269,13 +290,22 @@ network-monitor stats --database ./traffic.db -i en0
 
 ## 服务管理
 
-macOS（Homebrew）：
+macOS 用户级服务在登录后启动，使用当前用户运行：
 
 ```bash
 brew services info network-monitor      # 查看状态
 brew services restart network-monitor   # 重启
 brew services stop network-monitor      # 停止并取消登录后启动
 ```
+
+如果此前用 `sudo brew services start network-monitor` 注册了系统级服务，它会在开机后启动。查看和重启现有系统级服务：
+
+```bash
+sudo launchctl print system/sh.brew.network-monitor
+sudo launchctl kickstart -k system/sh.brew.network-monitor
+```
+
+两种服务使用同一个 Homebrew 配置。每个数据库只能由一个采集进程写入，请按已注册的级别管理服务。
 
 Linux（deb / systemd）：
 
@@ -309,8 +339,9 @@ Homebrew 更新：
 ```bash
 brew update
 brew upgrade network-monitor
-brew services restart network-monitor
 ```
+
+升级后按[服务管理](#服务管理)中的对应命令重启现有服务。
 
 Homebrew 卸载：
 

@@ -12,6 +12,7 @@ import tempfile
 
 from scripts.release import ROOT, check_version, third_party_notices
 from install_paths import RUNTIME_DIRECTORY
+from shell_completion import SCRIPTS
 
 
 ARCHITECTURES = {'x86_64': ('amd64', 62), 'aarch64': ('arm64', 183), 'arm64': ('arm64', 183)}
@@ -58,6 +59,9 @@ def build(binary, output, version):
         write('usr/lib/network-monitor/debian-package', 'network-monitor\n')
         (package / 'usr/bin').mkdir(parents=True)
         (package / 'usr/bin/network-monitor').symlink_to('../lib/network-monitor/network-monitor')
+        write('usr/share/bash-completion/completions/network-monitor', SCRIPTS['bash'])
+        write('usr/share/zsh/vendor-completions/_network_monitor', SCRIPTS['zsh'])
+        write('usr/share/fish/vendor_completions.d/network-monitor.fish', SCRIPTS['fish'])
         source = ROOT / 'packaging/debian'
         write('etc/network-monitor/config.ini', (source / 'config.ini').read_text(encoding='utf-8'))
         write('usr/lib/systemd/system/network-monitor.service',

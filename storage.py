@@ -72,7 +72,7 @@ class Writer:
 
 
 @contextmanager
-def reader(path):
+def reader(path, *, timeout=5):
     path = Path(path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError('找不到数据库: {}'.format(path))
@@ -84,7 +84,7 @@ def reader(path):
             raise RuntimeError('该文件不是受支持的 network-monitor 数据库')
 
     with ExitStack() as resources:
-        connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)
+        connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=timeout)
         resources.callback(connection.close)
         try:
             begin(connection)
@@ -103,7 +103,7 @@ def reader(path):
                 raise error
             if Path(str(path) + '-wal').exists():
                 raise error
-            connection = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=5)
+            connection = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=timeout)
             resources.callback(connection.close)
             begin(connection)
         yield connection

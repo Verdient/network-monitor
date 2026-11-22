@@ -12,7 +12,7 @@ import sys
 import time
 
 import monitor
-from stats_display import (Dashboard, LiveSample, Report, chart_scale, display_width, ip_preview_budget,
+from stats_display import (Dashboard, IP_VIEWS, LiveSample, Report, chart_scale, display_width, ip_preview_budget,
                            ip_preview_fits, metric_rail_width, pad, SINGLE_PAGE, traffic)
 import storage
 import time_ranges
@@ -268,7 +268,7 @@ def run(args, parser):
         from tcp_connections import ConnectionReader
 
         sampler = LiveSampler(interface, args.interval or REFRESH_SECONDS, keep_chart=not args.no_chart)
-        connections = ConnectionReader()
+        connections = ConnectionReader(interface)
         ip_capture = None
         # Socket updates can arrive between byte samples. Reuse the current SQL result.
         query = lru_cache(maxsize=1)(read_report)
@@ -276,7 +276,7 @@ def run(args, parser):
         limit = initial_end if args.end is not None or args.day is not None else math.inf
         end = start
 
-        def frame(size, collect, view='traffic', peer_page=0, ip_sort=None, theme=None):
+        def frame(size, collect, view='traffic', peer_page=0, ip_sort=None, theme=None, connection_key=None):
             nonlocal end, ip_capture
             if ip_capture is None:
                 preview = False
@@ -288,7 +288,7 @@ def run(args, parser):
                     header_rows = 7 if columns >= 112 and rows >= 42 else 5
                     chart_space = rows - header_rows - 1 - (0 if rail else 9)
                     preview = ip_preview_fits(columns, rows, rail) and ip_preview_budget(chart_space, args.height)
-                if view == 'ip' or preview:
+                if view in IP_VIEWS or preview:
                     from ip_traffic import IPTraffic
                     ip_capture = IPTraffic(interface, connections.changed)
                     ip_capture.start()
@@ -308,7 +308,8 @@ def run(args, parser):
             paging = list(SINGLE_PAGE)
             screen = dashboard_text(args, interface, zone, (start, end), terminal, sampler, size,
                                     query=query, view=view, peer_page=peer_page, ip_capture=ip_capture,
-                                    ip_sort=ip_sort, click_targets=click_targets, theme=theme, paging=paging)
+                                    ip_sort=ip_sort, click_targets=click_targets, theme=theme, paging=paging,
+                                    connection_key=connection_key)
             return screen, sampler.next_sample, click_targets, paging
         try:
             run_live(frame, connections.changed, sampler.change_interval)
@@ -468,7 +469,7 @@ def query_terminal_theme():
 
 def dashboard_text(args, interface, zone, times, terminal, sampler=None, size=None,
                    query=None, view='traffic', peer_page=0, ip_capture=None, ip_sort=None, click_targets=None,
-                   theme=None, paging=None):
+                   theme=None, paging=None, connection_key=None):
     if size is None:
         size = terminal_size(terminal)
     terminal_width = size.columns or 100
@@ -487,10 +488,10 @@ def dashboard_text(args, interface, zone, times, terminal, sampler=None, size=No
     columns = None if args.no_chart or compact else min(args.width or graph_width, graph_width - 12)
     buckets = 2 * columns if sampler is not None and columns else columns
     targets = [] if click_targets is not None else None
-    if view == 'ip':
-        screen = display.ip_screen(ip_capture, rows, peer_page, ip_sort, targets)
+    if view in IP_VIEWS:
+        screen = display.ip_screen(ip_capture, rows, peer_page, ip_sort, targets, view=view)
     elif view == 'connections':
-        screen = display.connection_screen(sampler.connections, rows, peer_page, targets)
+        screen = display.connection_screen(sampler.connections, rows, peer_page, targets, selected=connection_key)
     else:
         report = (query or read_report)(args.database, interface, zone, *times, buckets, sampler)
         screen = display.render(report, args.height, live_sample=sampler.reading if sampler else None,
@@ -578,8 +579,11 @@ def run_live(render, changed, change_interval):
         resize_deadline = math.inf
         redraw = False
         view = 'traffic'
+        ip_view = 'ip'
+        connection_key = None
+        overview_page = 0
         peer_page, page_count = SINGLE_PAGE
-        ip_sort = None
+        ip_sorts = {}
         click_targets = []
         pending_input = b''
         while True:
@@ -588,7 +592,9 @@ def run_live(render, changed, change_interval):
             if collect or redraw or now >= resize_deadline or (changed.is_set() and resize_started is None):
                 changed.clear()
                 previous = lines if resize_started is None else []
-                screen, deadline, click_targets, paging = render(size, collect, view, peer_page, ip_sort, theme)
+                sort_view = 'ip-local' if view == 'ip-local' else 'ip'
+                screen, deadline, click_targets, paging = render(size, collect, view, peer_page,
+                                                                 ip_sorts.get(sort_view), theme, connection_key)
                 peer_page, page_count = paging
                 lines = screen.split('\n')
                 update = live_update(lines, previous, size.lines or 30)
@@ -616,24 +622,49 @@ def run_live(render, changed, change_interval):
                             theme = key
                             redraw = True
                         continue
-                    if isinstance(key, tuple):
+                    if view == 'connections' and connection_key is None and isinstance(key, str) and key in '123456789':
+                        addresses = list(dict.fromkeys(action for _, _, _, action in click_targets
+                                                       if isinstance(action, tuple) and action[0] == 'tcp-address'))
+                        index = int(key) - 1
+                        if index >= len(addresses):
+                            continue
+                        key = addresses[index]
+                    elif isinstance(key, tuple):
                         x, y = key
                         key = next((action for row, left, right, action in click_targets
                                     if row == y and left <= x < right), None)
                         if key is None:
                             continue
-                        if y != len(lines) - 1 and key not in ('p', 'n'):
-                            if view in ('traffic', 'ip'):
+                        if y != len(lines) - 1 and not isinstance(key, tuple) and key not in ('p', 'n'):
+                            if view == 'traffic' or view in IP_VIEWS:
+                                sort_view = 'ip-local' if view == 'ip-local' else 'ip'
+                                ip_sort = ip_sorts.get(sort_view, ('address', False) if sort_view == 'ip-local' else None)
                                 descending = not ip_sort[1] if ip_sort and ip_sort[0] == key else key != 'address'
-                                ip_sort = key, descending
+                                ip_sorts[sort_view] = key, descending
                                 peer_page = 0
                                 redraw = True
                             continue
+                    if isinstance(key, tuple) and key[0] == 'tcp-address':
+                        if view != 'connections' or connection_key is not None:
+                            continue
+                        overview_page = peer_page
+                        connection_key = key[1:]
+                        peer_page, page_count = SINGLE_PAGE
+                        redraw = True
+                        continue
                     if key == 'q':
                         return
-                    if key in 'ci':
-                        target = 'ip' if key == 'i' else 'connections'
+                    if key in ('c', 'i'):
+                        target = ip_view if key == 'i' else 'connections'
                         view = 'traffic' if view == target else target
+                        connection_key = None
+                        peer_page, page_count = SINGLE_PAGE
+                    elif key == 'b' and view == 'connections' and connection_key is not None:
+                        connection_key = None
+                        peer_page = overview_page
+                    elif key == 'm' and view in IP_VIEWS:
+                        ip_view = 'ip' if view == 'ip-local' else 'ip-local'
+                        view = ip_view
                         peer_page, page_count = SINGLE_PAGE
                     elif key in '+-':
                         deadline = change_interval(MIN_LIVE_INTERVAL if key == '+' else -MIN_LIVE_INTERVAL)

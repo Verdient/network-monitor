@@ -31,6 +31,10 @@ CHINESE_REGIONS = {'HK': '香港', 'MO': '澳门', 'TW': '台湾'}
 CITY_EQUIVALENT_REGIONS = {'北京', '天津', '上海', '重庆', *CHINESE_REGIONS.values()}
 LAN_NETWORKS = tuple(map(ip_network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
                                       '169.254.0.0/16', 'fc00::/7', 'fe80::/10')))
+MULTICAST_GROUPS = {
+    'ff02::16': 'MLDv2 路由器组播',
+    'ff02::1:2': 'DHCPv6 中继/服务器组播',
+}
 PROVINCE_SUFFIX = re.compile(r'(壮族自治区|回族自治区|维吾尔自治区|自治区|特别行政区|省|市)$')
 ENGLISH_SUFFIX = re.compile(r' (?:(?:hui|uygur|uyghur|zhuang) autonomous region|autonomous region|province|municipality)$')
 PROVINCES = {
@@ -119,14 +123,20 @@ def normalize_city(label):
     return '·'.join((canonical, region, country))
 
 
+def peer_ip(address):
+    ip = ip_address(address)
+    return (ip.ipv4_mapped or ip) if ip.version == 6 else ip
+
+
 @lru_cache(maxsize=4096)
 def classify_address(address):
-    ip = ip_address(address)
-    if ip.version == 6:
-        ip = ip.ipv4_mapped or ip
+    ip = peer_ip(address)
     if any(ip in network for network in LAN_NETWORKS):
         return '', PeerDetails('局域网')
-    if ip.is_global and not ip.is_multicast and not ip.is_reserved:
+    if ip.is_multicast:
+        group = MULTICAST_GROUPS.get(str(ip).partition('%')[0], f'IPv{ip.version} 组播')
+        return '', PeerDetails(group)
+    if ip.is_global and not ip.is_reserved:
         return str(ip).partition('%')[0], PeerDetails()
     return '', PeerDetails()
 

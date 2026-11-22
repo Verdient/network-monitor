@@ -61,6 +61,10 @@ class DebianPackageTests(unittest.TestCase):
         self.assertEqual(link.readlink(), Path('library.so.1'))
         self.assertEqual(link.read_bytes(), b'runtime library')
         self.assertTrue((extracted / 'usr/lib/network-monitor/debian-package').is_file())
+        for path in ('usr/share/bash-completion/completions/network-monitor',
+                     'usr/share/zsh/vendor-completions/_network_monitor',
+                     'usr/share/fish/vendor_completions.d/network-monitor.fish'):
+            self.assertIn('__complete', (extracted / path).read_text())
         self.assertEqual((extracted / 'DEBIAN/conffiles').read_text(), '/etc/network-monitor/config.ini\n')
         config = configparser.ConfigParser()
         config.read(extracted / 'etc/network-monitor/config.ini')

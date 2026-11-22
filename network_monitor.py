@@ -10,6 +10,7 @@ import monitor
 import stats
 import service_install
 import configuration
+import shell_completion
 from cli_support import config_help, add_config_argument, make_parser
 from version import __version__
 
@@ -54,7 +55,7 @@ def build_parser():
 
 ''' + configuration_help)
     add_config_argument(parser)
-    parser.add_argument('--version', action='version', version='%(prog)s ' + __version__,
+    parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__,
                         help='显示版本号并退出')
     stats.configure_parser(parser, live_only=True)
     parser.set_defaults(handler=stats.run, command_parser=parser)
@@ -72,12 +73,23 @@ def build_parser():
         module.configure_parser(command)
         command.set_defaults(handler=module.run, command_parser=command)
         command_parsers[name] = command
+    completion = commands.add_parser('completion', help='输出 Tab 补全脚本',
+                                     description='输出指定 Shell 的 Tab 补全脚本。')
+    completion.add_argument('shell', choices=shell_completion.SCRIPTS, help='使用的 Shell')
+    command_parsers['completion'] = completion
     return parser, command_parsers
 
 
 def main(argv=None):
-    parser, _ = build_parser()
+    argv = sys.argv[1:] if argv is None else list(argv)
+    parser, commands = build_parser()
+    if argv[:1] == ['__complete']:
+        shell_completion.respond(parser, commands, argv[1:])
+        return 0
     args = parser.parse_args(argv)
+    if args.command == 'completion':
+        print(shell_completion.SCRIPTS[args.shell], end='')
+        return 0
     try:
         defaults, config_path = configuration.load(args.config)
     except ValueError as error:

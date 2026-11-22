@@ -13,6 +13,7 @@ import unittest
 from zoneinfo import ZoneInfo
 
 import storage
+from version import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMAND = ([str(Path(os.environ['NETWORK_MONITOR_BINARY']).resolve())]
@@ -51,6 +52,43 @@ class CommandTests(unittest.TestCase):
 
     def stats_config(self, database='samples.db', name='custom.ini', extra=''):
         return self.config('[monitor]\ndatabase = {}\n[stats]\ntimezone=UTC\n{}'.format(database, extra), name)
+
+    def test_version_aliases_and_completion_scripts_skip_configuration(self):
+        self.config('invalid', 'invalid.ini')
+        for version in ('-v', '--version'):
+            result = self.invoke('-c', 'invalid.ini', version)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'network-monitor ' + __version__ + '\n')
+        for shell, registration in (('bash', 'complete -o filenames'), ('zsh', '#compdef network-monitor'),
+                                    ('fish', 'complete -c network-monitor')):
+            result = self.invoke('-c', 'invalid.ini', 'completion', shell)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(registration, result.stdout)
+
+    def test_completion_accounts_for_command_option_values_and_conflicts(self):
+        def complete(prefix, *words):
+            result = self.invoke('__complete', 'words', prefix, *words)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.splitlines()[1:]
+
+        self.assertEqual(complete('st', '-c', 'monitor'), ['stats'])
+        self.assertEqual(complete('h', 'stats', '--traffic'), ['hour'])
+        self.assertEqual(complete('--traffic=mon', 'stats'), ['--traffic=month'])
+        self.assertEqual(complete('--cou', 'stats', '--traffic', 'day'), ['--count'])
+        self.assertEqual(complete('--no-chart', 'stats', '--chart'), [])
+        self.assertEqual(complete('--start', 'stats', '--last', '15m'), [])
+        self.assertEqual(complete('--system', 'install', '--user'), [])
+        self.assertCountEqual(complete('42', '--last'), ['42s', '42m', '42h', '42d'])
+
+    def test_completion_suggests_config_paths_and_historical_interfaces(self):
+        self.samples(name='history file.db', interface='historical-interface')
+        name = self.stats_config(database='history file.db', name='my config.ini')
+        for words in (('-c', name, 'stats', '-i'), ('stats', '--database=history file.db', '-i')):
+            result = self.invoke('__complete', 'words', 'historical-', *words)
+            self.assertEqual(result.stdout.splitlines(), ['words', 'historical-interface'])
+        result = self.invoke('__complete', 'words', '--config=my c')
+        self.assertEqual(result.stdout.splitlines(), ['path', '--config=my config.ini'])
+        self.assertFalse((self.cwd / 'network-monitor.db').exists())
 
     def test_help_includes_commands_and_config_priority(self):
         for command in ((), ('monitor',), ('stats',), ('install',)):

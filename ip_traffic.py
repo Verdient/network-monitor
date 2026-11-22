@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from ip_location import IPLocations
+from ip_location import IPLocations, peer_ip
 
 
 def system_environment():
@@ -99,6 +99,20 @@ class PeerTraffic:
     up_mbps: float
 
 
+def traffic_rows(totals, delta, factor, addresses=None):
+    for address, (down, up) in delta.items():
+        counts = totals.setdefault(address, [0, 0])
+        counts[0] += down
+        counts[1] += up
+    rows = []
+    visible_addresses = totals if addresses is None else addresses
+    for address in visible_addresses:
+        total_down, total_up = totals.get(address, (0, 0))
+        down, up = delta.get(address, (0, 0))
+        rows.append(PeerTraffic(str(ip_address(address)), total_down, total_up, down * factor, up * factor))
+    return sorted(rows, key=lambda row: (-(row.down_mbps + row.up_mbps), -(row.download + row.upload), row.address))
+
+
 class IPTraffic:
     def __init__(self, interface, changed):
         self.interface = interface
@@ -108,8 +122,13 @@ class IPTraffic:
         self.lock = threading.Lock()
         self.pending = {}
         self.totals = {}
+        self.local_pending = {}
+        self.local_totals = {}
+        self.local_addresses = set()
+        self.broadcasts = set()
         self.previous = None
         self.rows = []
+        self.local_rows = []
         self.status = ''
         self.ready = False
         self.hostnames = {}
@@ -139,6 +158,8 @@ class IPTraffic:
     def _read(self):
         proc = self.process
         errors = []
+        stop_addresses = threading.Event()
+        address_worker = None
 
         def read_errors():
             for line in proc.stderr:
@@ -153,32 +174,36 @@ class IPTraffic:
         diagnostics.start()
         try:
             local, broadcasts = interface_addresses(self.interface)
-            refresh_at = time.monotonic() + 10
+            with self.lock:
+                self.local_addresses, self.broadcasts = local, broadcasts
+            address_worker = threading.Thread(target=self._refresh_addresses, args=(stop_addresses,), daemon=True)
+            address_worker.start()
             for src, dst, length in ip_packets(proc.stdout):
-                now = time.monotonic()
-                if now >= refresh_at:
-                    local, broadcasts = interface_addresses(self.interface)
-                    refresh_at = now + 10
-                receive = dst in local
-                send = src in local
                 multicast = dst[0] == 255 if len(dst) == 16 else 224 <= dst[0] <= 239
-                if not send and (multicast or dst in broadcasts or dst == b'\xff' * 4):
-                    receive = True
                 with self.lock:
-                    if receive:
+                    send = src in self.local_addresses
+                    if dst in self.local_addresses:
+                        self.local_pending.setdefault(dst, [0, 0])[0] += length
+                        self.pending.setdefault(src, [0, 0])[0] += length
+                    elif not send and (multicast or dst in self.broadcasts or dst == b'\xff' * 4):
+                        # A received group packet has no individual local destination IP.
                         self.pending.setdefault(src, [0, 0])[0] += length
                     if send:
+                        self.local_pending.setdefault(src, [0, 0])[1] += length
                         self.pending.setdefault(dst, [0, 0])[1] += length
             self.status = 'IP 采集已结束'
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             self.status = '无法采集 IP 流量：' + str(error)
         finally:
+            stop_addresses.set()
             if proc.poll() is None:
                 proc.terminate()
             proc.stdout.close()
             proc.wait()
             diagnostics.join()
             proc.stderr.close()
+            if address_worker is not None:
+                address_worker.join()
             if proc.returncode and errors:
                 if any('permi' in message.lower() for message in errors):
                     self.status = '当前用户没有此网卡的抓包权限'
@@ -187,29 +212,35 @@ class IPTraffic:
             self.ready = False
             self.changed.set()
 
+    def _refresh_addresses(self, stop):
+        while not stop.wait(10):
+            try:
+                local, broadcasts = interface_addresses(self.interface)
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+                continue
+            with self.lock:
+                self.local_addresses, self.broadcasts = local, broadcasts
+
     def sample(self):
         if self.previous is None:
             return
         with self.lock:
             now = time.monotonic()
             delta, self.pending = self.pending, {}
+            local_delta, self.local_pending = self.local_pending, {}
+            local = self.local_addresses
         elapsed = now - self.previous
         self.previous = now
-        for peer, (down, up) in delta.items():
-            totals = self.totals.setdefault(peer, [0, 0])
-            totals[0] += down
-            totals[1] += up
-        rows = []
         factor = 8 / elapsed / 1e6 if elapsed > 0 else 0
-        for peer, (total_down, total_up) in self.totals.items():
-            down, up = delta.get(peer, (0, 0))
-            rows.append(PeerTraffic(str(ip_address(peer)), total_down, total_up, down * factor, up * factor))
-        self.rows = sorted(rows, key=lambda row: (-(row.down_mbps + row.up_mbps),
-                                                 -(row.download + row.upload), row.address))
+        self.rows = traffic_rows(self.totals, delta, factor)
+        self.local_rows = traffic_rows(self.local_totals, local_delta, factor, local)
 
     def hostname(self, address):
         with self.lock:
             if address not in self.hostnames and not self.closed.is_set():
+                if peer_ip(address).is_multicast:
+                    self.hostnames[address] = ''
+                    return ''
                 try:
                     self.hostname_requests.put_nowait(address)
                 except Full:
@@ -229,6 +260,8 @@ class IPTraffic:
                 name = socket.gethostbyaddr(address)[0].rstrip('.')
             except OSError:
                 continue
+            if name.casefold() == '_gateway':
+                name = '默认网关'
             if name and name != address:
                 with self.lock:
                     self.hostnames[address] = name

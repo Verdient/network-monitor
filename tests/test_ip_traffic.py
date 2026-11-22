@@ -125,8 +125,11 @@ class IPTrafficTests(unittest.TestCase):
                 for address in ('10.0.0.1', '172.31.0.1', '192.168.0.1', '169.254.1.1',
                                 'fe80::1', 'fd00::1', '::ffff:192.168.0.1'):
                     self.assertEqual(locations.lookup(address), PeerDetails('局域网'))
-                for address in ('192.0.2.1', '100.64.0.1', 'ff02::1'):
+                for address in ('192.0.2.1', '100.64.0.1'):
                     self.assertEqual(locations.lookup(address), PeerDetails())
+                for address, label in (('ff02::1', 'IPv6 组播'), ('::ffff:224.0.0.1', 'IPv4 组播'),
+                                       ('ff02::16%en0', 'MLDv2 路由器组播')):
+                    self.assertEqual(locations.lookup(address), PeerDetails(label))
                 self.assertIsNone(locations.worker)
                 self.assertEqual(locations.lookup('223.5.5.5'), PeerDetails())
                 self.assertTrue(started.wait(2))
@@ -389,6 +392,48 @@ class IPTrafficTests(unittest.TestCase):
             self.assertTrue(all(display_width(line) <= cols for line in view.splitlines()))
             self.assertIn('0.1s', view)
 
+    def test_local_addresses_count_their_own_packets_and_keep_idle_addresses(self):
+        first, second, ipv6, idle = '192.0.2.1', '192.0.2.2', '2001:db8::1', '192.0.2.3'
+        peer, peer6, broadcast = '192.0.2.4', '2001:db8::2', '192.0.2.255'
+        traffic = IPTraffic('en0', threading.Event())
+        traffic.process = Mock(returncode=0, stdout=capture(101, [
+            packet(first, peer, 200), packet(peer, second, 300), packet(peer6, ipv6, 400),
+            packet(second, first, 500), packet(ipv6, 'ff02::16', 600),
+            packet(peer6, 'ff02::1', 700), packet(peer, broadcast, 800),
+            packet(peer, '255.255.255.255', 900),
+        ]), stderr=BytesIO())
+        addresses = {ip_address(address).packed for address in (first, second, ipv6, idle)}
+        with patch('ip_traffic.interface_addresses', return_value=(addresses, {ip_address(broadcast).packed})):
+            traffic._read()
+        traffic.previous = 10
+        with patch('ip_traffic.time.monotonic', side_effect=(11, 12)):
+            traffic.sample()
+            rows = {row.address: row for row in traffic.local_rows}
+            expected = {first: (500, 200), second: (300, 500), ipv6: (400, 600), idle: (0, 0)}
+            self.assertEqual({address: (row.download, row.upload) for address, row in rows.items()}, expected)
+            self.assertAlmostEqual(rows[first].down_mbps, 500 * 8 / 1e6)
+            self.assertAlmostEqual(rows[ipv6].up_mbps, 600 * 8 / 1e6)
+            self.assertEqual(next(row for row in traffic.rows if row.address == peer).download, 2000)
+            traffic.sample()
+            self.assertEqual({row.address: (row.download, row.upload) for row in traffic.local_rows}, expected)
+            self.assertTrue(all(row.down_mbps == row.up_mbps == 0 for row in traffic.local_rows))
+
+    def test_local_view_shows_only_local_addresses_without_peer_lookups(self):
+        capture = SimpleNamespace(interface='en0', status='', rows=[PeerTraffic('8.8.8.8', 100, 0, 1, 0)],
+                                  local_rows=[PeerTraffic('192.168.0.10', 100, 0, 1, 0)],
+                                  peer_details=Mock(return_value=PeerDetails()), hostname=Mock(return_value=''))
+        display = Dashboard(100)
+        local = display.ip_screen(capture, 16, 0, view='ip-local')
+        self.assertIn('本机 IP · en0', local)
+        self.assertIn('192.168.0.10', local)
+        self.assertNotIn('8.8.8.8', local)
+        capture.peer_details.assert_not_called()
+        capture.hostname.assert_not_called()
+        peer = display.ip_screen(capture, 16, 0)
+        self.assertIn('对端 IP · en0', peer)
+        self.assertIn('8.8.8.8', peer)
+        self.assertNotIn('192.168.0.10', peer)
+
     def test_reverse_dns_is_asynchronous_and_caches_both_outcomes(self):
         ipv4, ipv6, missing = '192.0.2.1', '2001:db8::1', '192.0.2.2'
         started, release = threading.Event(), threading.Event()
@@ -426,6 +471,31 @@ class IPTrafficTests(unittest.TestCase):
                 if traffic.hostname_worker is not None:
                     traffic.hostname_worker.join(2)
             self.assertFalse(traffic.hostname_worker.is_alive())
+
+    def test_ip_table_labels_gateway_and_multicast(self):
+        gateway = '192.168.88.1'
+        traffic = IPTraffic('en0', threading.Event())
+        traffic.rows = [PeerTraffic(address, 100, 200, 1, 2) for address in ('ff02::16', 'ff02::1:2', gateway)]
+        display = Dashboard(132)
+        with patch('ip_traffic.socket.gethostbyaddr', return_value=('_gateway.', [], [gateway])) as resolver:
+            try:
+                display.ip_panel(traffic, 132, 8, 0)
+                self.assertTrue(traffic.changed.wait(2))
+                lines, _ = display.ip_panel(traffic, 132, 8, 0)
+                rendered = '\n'.join(lines)
+                self.assertIn('ff02::16  MLDv2 路由器组播', rendered)
+                self.assertIn('ff02::1:2  DHCPv6 中继/服务器组播', rendered)
+                self.assertIn(gateway + '  局域网  默认网关', rendered)
+                self.assertNotIn('_gateway', rendered)
+                narrow = Dashboard(30)
+                lines, _ = narrow.ip_panel(traffic, 30, 7, 1)
+                self.assertIn('DHCPv6 中继/服务器组播', '\n'.join(lines))
+                self.assertIsNone(traffic.locations.worker)
+                resolver.assert_called_once_with(gateway)
+            finally:
+                traffic.close()
+                if traffic.hostname_worker is not None:
+                    traffic.hostname_worker.join(2)
 
     def test_names_fit_without_changing_peer_layout(self):
         addresses = ('192.0.2.2', '2001:db8::2', '192.0.2.3')

@@ -2,6 +2,7 @@
 
 from bisect import bisect_left
 from dataclasses import dataclass
+from heapq import nlargest
 from ipaddress import ip_address
 from itertools import groupby, zip_longest
 import math
@@ -61,6 +62,7 @@ IP_COLUMNS = (
     ('down_mbps', '↓ 下载速率', '↓速'), ('up_mbps', '↑ 上传速率', '↑速'),
     ('download', '↓ 累计下载', '↓量'), ('upload', '↑ 累计上传', '↑量'),
 )
+IP_VIEWS = ('ip', 'ip-local')
 CARRIER_ALIASES = tuple(
     (re.compile(pattern, re.IGNORECASE), label)
     for pattern, label in (
@@ -179,6 +181,19 @@ def ip_preview_fits(columns, rows, rail):
 def ip_preview_budget(space, height):
     budget = min(space // 3, space - 5 - 2 * (height or 4))
     return budget if budget >= 7 else 0
+
+
+def address_pages(heights, room, shortcuts=False):
+    """Pack complete address rows, including IPv6 and namespace continuations."""
+    pages = []
+    start = used = end = 0
+    for index, height in enumerate(heights):
+        if used and (used + height > room or (shortcuts and index - start == 9)):
+            pages.append((start, index))
+            start, used = index, 0
+        used += height
+        end = index + 1
+    return [*pages, (start, end)]
 
 
 class Dashboard:
@@ -559,6 +574,186 @@ class Dashboard:
         title = 'TCP 连接 · 部分' if snapshot.partial else 'TCP 连接 · 本机'
         return self.panel(title, lines[:budget - 2], width=width, role='ink'), paging
 
+    def connection_fields(self, fields, width):
+        lines = []
+        line = ''
+        for field in fields:
+            combined = line + '  ' + field if line else field
+            if line and display_width(combined) > width:
+                lines.append(line)
+                line = field
+            else:
+                line = combined
+        if line:
+            lines.append(line)
+        return [clip(line, width) for line in lines]
+
+    def section_heading(self, title, detail, width, role):
+        detail = clean(detail)
+        left = '╺━ ' + clip(clean(title), width - 3)
+        spare = width - display_width(left)
+        if detail and display_width(detail) + 4 <= spare:
+            rule = '─' * (spare - display_width(detail) - 3)
+            return self.paint(left, role, bold=True) + self.paint('  ' + rule + ' ', 'frame') + self.paint(detail, 'muted')
+        return self.paint(left, role, bold=True)
+
+    def meter(self, fraction, width, role):
+        if width <= 0:
+            return ''
+        filled = min(width, max(1, round(fraction * width))) if fraction > 0 else 0
+        return self.paint('━' * filled, role) + self.paint('┄' * (width - filled), 'grid')
+
+    @staticmethod
+    def share_label(fraction):
+        return '<1%' if 0 < fraction < 0.01 else '{:.0%}'.format(fraction)
+
+    def readout_card(self, title, value, notes, width, role, large):
+        inside = width - 4
+        digits = self.digits(value, role, inside) if large and self.colors else []
+        if large and self.colors and not digits:
+            digits = ['', self.paint(clip(value, inside), role, bold=True), '']
+        lines = digits or [self.paint(clip(value, inside), role, bold=True)]
+        for label, reading in notes:
+            room = max(1, inside - display_width(label) - 1)
+            lines.append(self.paint(label, 'muted') + ' ' + pad(reading, room, right=True))
+        return self.panel(title, lines, width=width, role=role)
+
+    def port_summary(self, group, width, cards, large):
+        usage = group.ports
+        fraction = usage.fraction if usage else None
+        ratio = '{:.1%}'.format(fraction) if fraction is not None else '—'
+        occupied = '{:,}/{:,}'.format(usage.used, usage.total) if usage else '—'
+        remaining = '{:,}'.format(usage.remaining) if usage else '—'
+        capacity = '{:,}'.format(group.new_target_remaining) if group.new_target_remaining is not None else '—'
+        if not cards:
+            occupancy = ['临时端口容量未知'] if usage is None else ['端口占用 ' + occupied + ' ' + ratio,
+                                                               '独占估计剩余 ' + remaining, '新目标容量 ' + capacity]
+            direction = ['出站已建立 {:,}'.format(group.outgoing), '入站已建立 {:,}'.format(group.incoming),
+                         '入站对端 {:,}'.format(group.incoming_peers)]
+            return ([self.paint(line, 'total') for line in self.connection_fields(occupancy, width)]
+                    + [self.paint(line, 'ink') for line in self.connection_fields(direction, width)])
+
+        left = (width - 1) // 2
+        right = width - left - 1
+        role = 'up' if fraction is not None and fraction >= .8 else 'total'
+        meter_width = min(12, max(0, left - display_width(occupied + ratio) - 15))
+        pressure = self.meter(fraction, meter_width, role) + ' ' if fraction is not None and meter_width else ''
+        allocation = [('占用', pressure + self.paint(occupied + ' ' + ratio, role)),
+                      ('新目标容量', self.paint(capacity, 'ink'))]
+        directions = [('入站已建立', self.paint('{:,}'.format(group.incoming), 'down')),
+                      ('入站对端', self.paint('{:,}'.format(group.incoming_peers), 'ink'))]
+        port_card = self.readout_card('独占估计剩余' if usage else '临时端口容量未知', remaining + ' 个',
+                                      allocation, left, role, large)
+        out_card = self.readout_card('出站已建立', '{:,} 条'.format(group.outgoing), directions, right, 'up', large)
+        return [a + ' ' + b for a, b in zip(port_card, out_card)]
+
+    def connection_details_panel(self, snapshot, history, width, budget, page, group=None):
+        title = 'TCP 连接 · ' + clean(snapshot.interface)
+        lines = [self.section_heading(title, '部分连接表可读' if snapshot.partial else '本机 TCP', width, 'ink')]
+        if budget >= 12:
+            counts = ['已建立 {:,}'.format(snapshot.established), '监听 {:,}'.format(snapshot.listening),
+                      'TIME_WAIT {:,}'.format(snapshot.time_wait), '其他 {:,}'.format(snapshot.other)]
+            lines.extend(self.paint(line, 'muted') for line in self.connection_fields(counts, width))
+        chart_room = 6 if history and budget >= 22 and width >= 42 else 0
+        if snapshot.address_status:
+            lines.append(self.paint(clip(snapshot.address_status, width), 'muted'))
+        if not snapshot.local:
+            return lines + [self.paint(clip('暂无可统计的本地 IP', width), 'muted')], SINGLE_PAGE
+
+        room = budget - len(lines) - chart_room
+        cards = width >= 76 and room >= 13
+        large = room >= 18
+        inside = width - 4
+        table = inside >= 70
+        meter_width = 8 if inside >= 100 else 0
+        est_width = 10 if inside >= 88 else 0
+        capacity_width, free_width, wait_width = 22 + meter_width, 11, 11
+        addr_width = inside - capacity_width - free_width - wait_width - est_width
+
+        def endpoint(target):
+            addr, port = target.endpoint
+            return '[{}]:{}'.format(addr, port) if ':' in addr else '{}:{}'.format(addr, port)
+
+        # Size each page from terminal geometry. Capacity also reserves continuation
+        # lines for full IPv6 endpoints, independently of the values being refreshed.
+        group = group or snapshot.local[0]
+        context = []
+        if group.namespace:
+            context.append('命名空间 {}'.format(group.namespace[1]))
+        if group.unknown:
+            context.append('方向未知 {:,}'.format(group.unknown))
+        detail = '  ·  '.join(context)
+        address = group.address
+        first = max(1, width - display_width('╺━ 本地 '))
+        head = self.section_heading('本地 ' + address[:first], detail, width, 'down')
+        identity = [head, *(self.paint(address[i:i + width], 'down')
+                            for i in range(first, len(address), width))]
+        if detail and detail not in head:
+            identity.extend(self.paint(line, 'muted') for line in self.connection_fields(context, width))
+        header = identity + self.port_summary(group, width, cards, large)
+        longest = max((len(t.endpoint[0]) + len(str(t.endpoint[1])) + (3 if ':' in t.endpoint[0] else 1)
+                       for t in group.targets), default=1)
+        address_rows = math.ceil(longest / (addr_width if table else inside))
+        row_height = address_rows if table else address_rows + (1 if inside >= 46 else 2)
+        data_room = room - len(header) - 2 - int(table)
+        split = bool(group.targets) and data_room < row_height
+        if split:
+            data_room = room - len(identity) - 2 - int(table)
+        capacity = max(1, data_room // row_height)
+        page_count = int(split) + max(1, math.ceil(len(group.targets) / capacity))
+        page = min(max(page, 0), page_count - 1)
+        index = page
+        if split:
+            if index == 0:
+                return (lines + header)[:budget], (page, page_count)
+            header = identity
+            index -= 1
+        lines.extend(header)
+        if len(lines) + 3 > budget:
+            return lines[:budget], (page, page_count)
+
+        offset = index * capacity
+        targets = group.targets[offset:offset + capacity]
+        detail = '{}–{} / {} 个目标'.format(offset + 1, offset + len(targets), len(group.targets)) if targets else ''
+        body = []
+        if table and targets:
+            columns = [('目标地址', addr_width), ('已建立', est_width), ('端口占用 / 利用率', capacity_width),
+                       ('估计剩余', free_width), ('TIME_WAIT', wait_width)]
+            body.append(self.paint(''.join(pad(name, size, right=i > 0) for i, (name, size) in enumerate(columns)
+                                           if size), 'muted'))
+        for target in targets:
+            name = endpoint(target)
+            usage = target.usage
+            fraction = usage.fraction if usage else None
+            ratio = '{:.1%}'.format(fraction) if fraction is not None else '—'
+            occupancy = '{:,}/{:,} {}'.format(usage.used, usage.total, ratio) if usage else '容量未知'
+            free = '{:,}'.format(usage.remaining) if usage else '—'
+            wait = '{:,}'.format(target.time_wait)
+            role = 'up' if fraction is not None and fraction >= .8 else 'total'
+            if table:
+                prefix = self.meter(fraction, meter_width - 1, role) + ' ' if meter_width and fraction is not None else ''
+                row = self.paint(pad(name[:addr_width], addr_width), 'ink')
+                if est_width:
+                    row += self.paint(pad('{:,}'.format(target.established), est_width, True), 'ink')
+                body.append(row + pad(prefix + self.paint(occupancy, role), capacity_width, True)
+                            + self.paint(pad(free, free_width, True), role, bold=True)
+                            + self.paint(pad(wait, wait_width, True), 'muted'))
+                body.extend(self.paint(name[i:i + addr_width], 'ink') for i in range(addr_width, len(name), addr_width))
+            else:
+                body.extend(self.paint(name[i:i + inside], 'ink') for i in range(0, len(name), inside))
+                fields = [occupancy, '估计剩余 ' + free, 'TIME_WAIT ' + wait]
+                body.extend(self.paint(line, role) for line in self.connection_fields(fields, inside))
+        if not targets:
+            body.append(self.paint('暂无可识别的出站目标', 'muted'))
+        available = budget - len(lines) - chart_room - 2
+        lines.extend(self.panel('出站目标', body[:available], width=width, detail=detail, accented=True))
+        if chart_room:
+            trace_rows = min(15, budget - len(lines) - 2)
+            trend = self.connection_trend(history, inside, max(4, trace_rows))
+            detail = ANSI.sub('', trend[0]).removeprefix('已建立趋势').strip(' ·')
+            lines.extend(self.panel('已建立趋势', trend[1:], width=width, detail=detail))
+        return lines, (page, page_count)
+
     def paint_button(self, text, role, enabled=True):
         if enabled:
             return self.paint(text, role, bold=True, reverse=True)
@@ -568,9 +763,14 @@ class Dashboard:
     def live_footer(self, row, view, paging, click_targets):
         page, page_count = paging
         period = '{:g}s'.format(self.interval)
-        navigation = [('q', '退出', 'total'), ('c', '返回' if view == 'connections' else '连接', 'up'),
-                      ('i', '返回' if view == 'ip' else 'IP', 'down')]
-        pages = [('p', '上页', 'ink'), ('n', '下页', 'ink')] if view == 'connections' and page_count > 1 else []
+        tcp_view = view in ('connections', 'connection-detail')
+        navigation = [('q', '退出', 'total'), ('c', '返回' if tcp_view else '连接', 'up'),
+                      ('i', '返回' if view in IP_VIEWS else 'IP', 'down')]
+        if view in IP_VIEWS:
+            navigation.append(('m', '对端 IP' if view == 'ip-local' else '本机 IP', 'ink'))
+        if view == 'connection-detail':
+            navigation.append(('b', '总览', 'down'))
+        pages = [('p', '上页', 'ink'), ('n', '下页', 'ink')] if tcp_view and page_count > 1 else []
         disabled = {key for key, blocked in (('n', page == page_count - 1), ('p', page == 0)) if blocked}
         interval = [('-', '', 'ink'), (None, period, 'muted'), ('+', '', 'ink')]
         links = navigation + pages
@@ -666,19 +866,162 @@ class Dashboard:
         sockets, _ = self.connection_panel(connections, self.columns, space - len(metrics))
         return metrics + sockets, SINGLE_PAGE
 
-    def connection_screen(self, connections, rows, page, click_targets=None):
+    def connection_overview(self, snapshot, history, rows, page, click_targets):
+        width = self.columns
+        inside = width - 4
+        groups = sorted(snapshot.local, key=lambda g: (g.namespace is not None, g.namespace or (),
+                                                       ip_address(g.address).version, int(ip_address(g.address))))
+        title = 'TCP 连接 · ' + clean(snapshot.interface)
+        detail = '{} 个地址{}'.format(len(groups), ' · 部分' if snapshot.partial else '')
+        lines = [self.section_heading(title, detail, width, 'ink')]
+        if rows >= 18 and width >= 60:
+            states = ['本机已建立 {:,}'.format(snapshot.established), '监听 {:,}'.format(snapshot.listening),
+                      'TIME_WAIT {:,}'.format(snapshot.time_wait), '其他 {:,}'.format(snapshot.other)]
+            lines.extend(self.paint(line, 'muted') for line in self.connection_fields(states, width))
+        if snapshot.address_status:
+            lines.append(self.paint(clip(snapshot.address_status, width), 'muted'))
+
+        columns = [('出站', 8, 'up'), ('入站', 8, 'down'), ('入站对端', 9, 'ink'),
+                   ('端口占用', 10, 'total'), ('独占剩余', 10, 'total'), ('目标最少剩余', 14, 'total')]
+        if inside < 90:
+            columns.pop(2)
+        if inside < 66:
+            columns.pop()
+        if inside < 50:
+            columns = [('出站', 6, 'up'), ('独占剩余', 9, 'total')]
+        if inside < 30:
+            columns = [('独占剩余', 9, 'total')]
+        address_width = inside - sum(size for _, size, _ in columns) - 3
+
+        def address_lines(group):
+            label = clean(group.address)
+            result = [label[i:i + address_width] for i in range(0, len(label), address_width)]
+            if group.namespace is not None:
+                result.append('命名空间 {}'.format(group.namespace[1]))
+            return result
+
+        room = max(1, rows - 1 - len(lines) - 4)
+        pages = address_pages((len(address_lines(g)) for g in groups), room, shortcuts=True)
+        page = min(max(0, page), len(pages) - 1)
+        start, stop = pages[page]
+        body = [self.paint('   ' + pad(clip('本地 IP', address_width), address_width) + ''.join(
+            pad(label, size, True) for label, size, _ in columns), 'muted')]
+        for number, group in enumerate(groups[start:stop], 1):
+            address = address_lines(group)
+            row = self.paint(' {} '.format(number), 'down') + self.paint(pad(address[0], address_width), 'ink')
+            usage = group.ports
+            fraction = usage.fraction if usage else None
+            # Targets are ranked by occupied ports within this address's port pool.
+            tightest = group.targets[0].usage if group.targets else None
+            values = {'出站': group.outgoing, '入站': group.incoming, '入站对端': group.incoming_peers,
+                      '端口占用': '{:.1%}'.format(fraction) if fraction is not None else None,
+                      '独占剩余': usage.remaining if usage else None, '目标最少剩余': tightest.remaining if tightest else None}
+            for label, size, role in columns:
+                value = values[label]
+                reading = format(value, ',') if isinstance(value, int) else value or '—'
+                row += self.paint(pad(clip(reading, size - 1), size, True), role if value is not None else 'muted')
+            action = ('tcp-address', group.namespace, group.address)
+            for line in [row, *('   ' + self.paint(clip(part, inside - 3), 'muted') for part in address[1:])]:
+                screen_row = len(lines) + len(body) + 1
+                if click_targets is not None and screen_row < rows - 2:
+                    click_targets.append((screen_row, 1, width - 1, action))
+                body.append(line)
+        keys = '1' if stop - start == 1 else '1–{}'.format(stop - start)
+        hint = '按 {} 或点击地址查看明细'.format(keys)
+        lines.extend(self.panel('本地地址总览', body[:room + 1], detail='{}/{}'.format(page + 1, len(pages))))
+        lines.append(self.paint(clip(hint, width), 'muted'))
+        spare = rows - len(lines) - 1
+        if history and spare >= 6 and width >= 42:
+            trend = self.connection_trend(history, inside, min(12, spare - 2))
+            detail = ANSI.sub('', trend[0]).removeprefix('已建立趋势').strip(' ·')
+            lines.extend(self.panel('已建立趋势', trend[1:], detail=detail))
+        return lines, (page, len(pages))
+
+    def connection_screen(self, connections, rows, page, click_targets=None, *, selected=None):
+        snap, history = connections
         if self.columns < 24 or rows < 4:
-            snap = connections[0]
             label = 'TCP 部分已建立' if snap.partial else 'TCP 已建立'
             lines = [clip(snap.status or '{} {}'.format(label, snap.established), self.columns)]
             paging = SINGLE_PAGE
+        elif selected is not None:
+            group = next((g for g in snap.local if (g.namespace, g.address) == selected), None)
+            if group is None:
+                lines, paging = [clip(snap.status or '地址已移除，按 b 返回总览', self.columns)], SINGLE_PAGE
+            else:
+                lines, paging = self.connection_details_panel(snap, history, self.columns, rows - 1, page, group)
+        elif len(snap.local) > 1:
+            lines, paging = self.connection_overview(snap, history, rows, page, click_targets)
+        elif snap.interface is not None:
+            lines, paging = self.connection_details_panel(*connections, self.columns, rows - 1, page)
         else:
             lines, paging = self.connection_panel(connections, self.columns, rows - 1, page)
-        return self.live_screen(lines, rows, 'connections', paging, click_targets)
+        return self.live_screen(lines, rows, 'connection-detail' if selected else 'connections', paging, click_targets)
 
-    def ip_screen(self, capture, rows, page, sort=None, click_targets=None):
-        lines, paging = self.ip_panel(capture, self.columns, rows - 1, page, sort, click_targets)
-        return self.live_screen(lines, rows, 'ip', paging, click_targets)
+    def ip_screen(self, capture, rows, page, sort=None, click_targets=None, *, view='ip'):
+        local = view == 'ip-local'
+        peers = capture.local_rows if local else capture.rows
+        width = self.columns
+        header = []
+        down = sum(peer.down_mbps for peer in peers)
+        up = sum(peer.up_mbps for peer in peers)
+        if width >= 36 and rows >= 11:
+            title = ('本机 IP' if local else '对端 IP') + ' · ' + clean(capture.interface)
+            active = sum(peer.down_mbps + peer.up_mbps > 0 for peer in peers)
+            header.append(self.section_heading(title, '{} 个地址  ·  {} 活跃'.format(len(peers), active), width, 'ink'))
+            if peers:
+                if local and len(peers) > 1:
+                    totals = ['地址合计', '↓ ' + speed(down), '↑ ' + speed(up)]
+                    header.extend(self.paint(line, 'ink') for line in self.connection_fields(totals, width))
+                elif width >= 60 and rows >= 16:
+                    cards = []
+                    directions = (('↓ 下载速率', down, sum(peer.download for peer in peers), 'down'),
+                                  ('↑ 上传速率', up, sum(peer.upload for peer in peers), 'up'))
+                    for index, (label, rate, size, role) in enumerate(directions):
+                        card_width = (width - 1 + index) // 2
+                        share = rate / (down + up) if down + up else 0
+                        bar = self.meter(share, min(16, card_width - 18), role)
+                        mix = self.share_label(share) if down + up else '—'
+                        notes = [('累计', self.paint(traffic(size), 'ink')),
+                                 ('速率占比', bar + ' ' + self.paint(mix, role))]
+                        cards.append(self.readout_card(label, speed(rate), notes, card_width, role, rows >= 23))
+                    header.extend(a + ' ' + b for a, b in zip(*cards))
+                else:
+                    header.extend(self.connection_fields(['↓ ' + speed(down), '↑ ' + speed(up)], width))
+        controls = [] if click_targets is not None else None
+        lines, paging = self.ip_panel(capture, width, rows - 1 - len(header), page, sort, controls,
+                                      view=view, summary=bool(header), combined_rate=down + up)
+        if click_targets is not None:
+            click_targets.extend((row + len(header), left, right, key) for row, left, right, key in controls)
+        body = header + lines
+        spare = rows - 1 - len(body)
+        if paging == SINGLE_PAGE and width >= 64 and spare >= 6:
+            body.extend(self.address_rates(peers, width, spare, local=local))
+        return self.live_screen(body, rows, view, paging, click_targets)
+
+    def address_rates(self, peers, width, budget, *, local=False):
+        if local:
+            if len(peers) > budget - 3 or not any(p.down_mbps or p.up_mbps for p in peers):
+                return []
+            top = sorted(peers, key=lambda p: (ip_address(p.address).version, int(ip_address(p.address))))
+        else:
+            active = (peer for peer in peers if peer.down_mbps + peer.up_mbps > 0)
+            top = nlargest(min(8, budget - 3), active, key=lambda peer: peer.down_mbps + peer.up_mbps)
+        if len(top) < 2:
+            return []
+        inside = width - 4
+        address_width = min(max(len(peer.address) for peer in top), inside - 34)
+        half = (inside - address_width - 4) // 2
+        peak = max(max(peer.down_mbps, peer.up_mbps) for peer in top)
+        left = self.paint(pad('下载 ←', half, True), 'down')
+        right = self.paint('→ 上传', 'up')
+        lines = [pad('地址', address_width) + '  ' + left + ' │' + right]
+        for peer in top:
+            down = max(1, round(half * peer.down_mbps / peak)) if peer.down_mbps else 0
+            up = max(1, round(half * peer.up_mbps / peak)) if peer.up_mbps else 0
+            bars = (self.paint(pad('━' * down, half, True), 'down') + self.paint(' │', 'grid')
+                    + self.paint('━' * up, 'up'))
+            lines.append(self.paint(pad(clip(peer.address, address_width), address_width), 'muted') + '  ' + bars)
+        return self.panel('双向速率对比', lines, width=width, detail='满刻度 ' + speed(peak))
 
     def ip_page_controls(self, columns, row, page, pages, click_targets):
         width = columns - 4
@@ -726,14 +1069,23 @@ class Dashboard:
             text += self.paint(space + value, role)
         return text
 
-    def ip_panel(self, capture, columns, budget, page, sort=None, click_targets=None):
+    def ip_panel(self, capture, columns, budget, page, sort=None, click_targets=None, *, view='traffic',
+                 summary=False, combined_rate=0):
         width = columns - 4
-        title = 'IP 流量 · ' + clean(capture.interface)
-        peers = capture.rows
-        status = clean(capture.status) or ('' if peers else '等待 IP 流量')
+        local = view == 'ip-local'
+        address_label = '本机 IP' if local else '对端 IP'
+        title = (address_label if view in IP_VIEWS else 'IP 流量') + ' · ' + clean(capture.interface)
+        if summary:
+            title = '本机地址流量' if local else '对端流量'
+        peers = capture.local_rows if local else capture.rows
+        status = clean(capture.status)
+        if not status and not peers:
+            status = '网卡暂无可统计的 IP' if local and capture.ready else '等待 IP 流量'
         if columns < 18 or budget < 4:
-            return [clip(title, columns), clip(status or '对端 {}'.format(len(peers)), columns)], SINGLE_PAGE
+            return [clip(title, columns), clip(status or '{} {}'.format(address_label, len(peers)), columns)], SINGLE_PAGE
 
+        if local and sort is None:
+            sort = ('address', False)
         if sort:
             column, descending = sort
             if column == 'address':
@@ -747,9 +1099,12 @@ class Dashboard:
                 peers = sorted(peers, key=lambda peer: (direction * getattr(peer, column), peer.address))
 
         longest = max((len(peer.address) for peer in peers), default=0)
-        wide = width >= max(67, longest + 52)
-        addr_width = width - 52 if wide else width
-        details_for = getattr(capture, 'peer_details', None)
+        compact_columns = local and 51 <= width < 69
+        wide = compact_columns or (width >= 69 if summary else width >= max(67, longest + 52))
+        share_width = 15 if summary and width >= 91 and (not local or width >= longest + 67) else 0
+        metric_widths = (11, 11, 9, 9) if compact_columns else (13, 13, 13, 13)
+        addr_width = width - sum(metric_widths) - share_width if wide else width
+        details_for = None if local else getattr(capture, 'peer_details', None)
         # A fixed second row gives the labels room without repaging when lookups complete.
         separate_details = details_for is not None and longest + 50 > addr_width
         # The compact IP header needs four cells and the other headers need five.
@@ -758,27 +1113,39 @@ class Dashboard:
         for group in range(0, len(IP_COLUMNS), per_row):
             left = 2  # The panel border and its inside padding precede the header.
             cells = []
-            for column, label, short in IP_COLUMNS[group:group + per_row]:
+            for index, (column, label, short) in enumerate(IP_COLUMNS[group:group + per_row], group):
+                if local and column == 'address':
+                    label = address_label
                 selected = sort is not None and sort[0] == column
                 indicator = ('▾' if sort[1] else '▴') if selected else ' '
-                cell_width = (addr_width if column == 'address' else 13) if wide else display_width(short) + 2
-                text = '{} {}'.format(label if wide else short, indicator)
+                cell_width = (addr_width if column == 'address' else metric_widths[index - 1]) if wide else display_width(short) + 2
+                text = '{} {}'.format(label if wide and not compact_columns else short, indicator)
                 cells.append(self.paint(pad(text, cell_width, right=wide and column != 'address'),
                                         'ink' if selected else 'muted'))
                 if click_targets is not None:
                     click_targets.append((len(lines) + 1, left, left + cell_width, column))
                 left += cell_width
+            if share_width:
+                cells.append(self.paint(pad('速率占比', share_width, True), 'muted'))
             lines.append(''.join(cells))
         if status and len(lines) < budget - 2:
             lines.append(self.paint(clip(status, width), 'muted'))
-        address_lines = max(1, (longest + addr_width - 1) // addr_width)
-        peer_rows = address_lines + (0 if wide else 2) + separate_details
-        capacity = max(1, (budget - 2 - len(lines)) // peer_rows)
-        pages = max(1, (len(peers) + capacity - 1) // capacity)
-        page = min(max(page, 0), pages - 1)
-        offset = page * capacity
-        hostname_for = getattr(capture, 'hostname', None)
-        for peer in peers[offset:offset + capacity]:
+        room = budget - 2 - len(lines)
+        extra = (0 if wide else 2) + separate_details
+        if local:
+            ranges = address_pages((math.ceil(len(peer.address) / addr_width) + extra for peer in peers), room)
+            pages = len(ranges)
+            page = min(max(page, 0), pages - 1)
+            offset, stop = ranges[page]
+        else:
+            peer_rows = max(1, math.ceil(longest / addr_width)) + extra
+            capacity = max(1, room // peer_rows)
+            pages = max(1, math.ceil(len(peers) / capacity))
+            page = min(max(page, 0), pages - 1)
+            offset = page * capacity
+            stop = min(offset + capacity, len(peers))
+        hostname_for = None if local else getattr(capture, 'hostname', None)
+        for peer in peers[offset:stop]:
             hostname = hostname_for(peer.address) if hostname_for is not None else ''
             location, carrier, asn = details_for(peer.address) if details_for is not None else ('', '', '')
             location = re.sub(r'州(?=·美国$)', '', location)
@@ -786,22 +1153,44 @@ class Dashboard:
             inline_fields = () if separate_details else fields
             values = (speed(peer.down_mbps), speed(peer.up_mbps), traffic(peer.download), traffic(peer.upload))
             if wide:
-                line = pad(self.ip_address_line(peer.address, inline_fields, addr_width), addr_width)
-                for value, role in zip(values, ('down', 'up', 'down', 'up')):
-                    line += self.paint(pad(clip(value, 12), 13, True), role)
+                line = pad(self.ip_address_line(peer.address[:addr_width], inline_fields, addr_width), addr_width)
+                for i, (value, role) in enumerate(zip(values, ('down', 'up', 'down', 'up'))):
+                    if summary:
+                        if i >= 2:
+                            role = 'peer_location'
+                        elif (peer.down_mbps, peer.up_mbps)[i] == 0:
+                            role = 'muted'
+                    size = metric_widths[i]
+                    reading = value.replace(' ', '') if compact_columns else value
+                    line += self.paint(pad(clip(reading, size - 1), size, True), role,
+                                       bold=summary and i < 2 and role != 'muted')
+                if share_width:
+                    share = (peer.down_mbps + peer.up_mbps) / combined_rate if combined_rate else 0
+                    percent = self.share_label(share) if combined_rate else '—'
+                    line += pad(self.meter(share, 7, 'total') + ' ' + pad(percent, 4, True), share_width, True)
                 lines.append(line)
+                lines.extend(self.paint(peer.address[i:i + addr_width], 'ink')
+                             for i in range(addr_width, len(peer.address), addr_width))
             else:
                 address = [peer.address[i:i + width] for i in range(0, len(peer.address), width)]
                 lines.extend(self.paint(part, 'ink') for part in address[:-1])
                 lines.append(self.ip_address_line(address[-1], inline_fields, width))
             if separate_details:
-                lines.append(self.ip_address_line('', fields, width))
+                indent = self.paint('  ╰ ', 'frame') if summary and any(fields) else ''
+                lines.append(indent + self.ip_address_line('', fields, width - display_width(indent)))
             if not wide:
-                for arrow, role, rate, total in (('↓', 'down', values[0], values[2]), ('↑', 'up', values[1], values[3])):
-                    lines.append(self.paint(clip('{} {}  ·  累计 {}'.format(arrow, rate, total), width), role))
+                if summary and width >= 38:
+                    half = width // 2
+                    lines.append(pad(self.paint('↓ ' + values[0], 'down'), half) + self.paint('↑ ' + values[1], 'up'))
+                    lines.append(self.paint(pad('累计 ' + values[2], half) + '累计 ' + values[3], 'muted'))
+                else:
+                    for arrow, role, rate, total in (('↓', 'down', values[0], values[2]), ('↑', 'up', values[1], values[3])):
+                        lines.append(self.paint(clip('{} {}  ·  累计 {}'.format(arrow, rate, total), width), role))
         lines = lines[:budget - 2]
-        lines.extend([''] * (budget - 2 - len(lines)))
-        panel = self.panel(title, lines, width=columns)
+        if not summary or pages > 1:
+            lines.extend([''] * (budget - 2 - len(lines)))
+        detail = '{}–{} / {}'.format(offset + 1, stop, len(peers)) if summary and peers else ''
+        panel = self.panel(title, lines, width=columns, detail=detail, accented=summary)
         if pages > 1:
             panel[-1] = self.ip_page_controls(columns, budget - 1, page, pages, click_targets)
         return panel, (page, pages)
