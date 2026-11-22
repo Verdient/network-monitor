@@ -1,9 +1,15 @@
 # Build with: python -m PyInstaller --clean --noconfirm network-monitor.spec
+import certifi
+
 a = Analysis(
     ['network_monitor.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('geo_data/territories.zh.json', 'geo_data'),
+           ('geo_data/cities.zh.json', 'geo_data'),
+           ('geo_data/LICENSE.unicode', 'geo_data'),
+           ('geo_data/opencc', 'geo_data/opencc'),
+           (certifi.where(), 'geo_data')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

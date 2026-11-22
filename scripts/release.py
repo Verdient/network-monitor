@@ -32,11 +32,22 @@ def third_party_notices():
                                if str(file).endswith('/COPYING.txt')), None)
     if pyinstaller_license is None or not pyinstaller_license.is_file():
         raise ValueError('找不到 PyInstaller COPYING.txt')
+    certifi = distribution('certifi')
+    certifi_license = next((Path(certifi.locate_file(file)) for file in certifi.files or []
+                            if file.name == 'LICENSE'), None)
+    if certifi_license is None or not certifi_license.is_file():
+        raise ValueError('找不到 certifi LICENSE')
+    geo_data = ROOT / 'geo_data'
     import sqlite3
     return ('Python runtime license\n======================\n' + python_license.read_text(encoding='utf-8')
             + '\n\nPyInstaller license and bootloader exception\n===========================================\n'
             + pyinstaller_license.read_text(encoding='utf-8')
-            + '\n\nSQLite {}\nSQLite is in the public domain. https://sqlite.org/copyright.html\n'.format(sqlite3.sqlite_version))
+            + '\n\nSQLite {}\nSQLite is in the public domain. https://sqlite.org/copyright.html\n'.format(sqlite3.sqlite_version)
+            + '\nCertifi CA certificates\n=======================\n' + certifi_license.read_text(encoding='utf-8')
+            + '\n\nUnicode CLDR territory names\n============================\n'
+            + (geo_data / 'LICENSE.unicode').read_text(encoding='utf-8')
+            + '\n\nOpenCC 1.1.9 dictionaries\n=========================\n'
+            + (geo_data / 'opencc/LICENSE').read_text(encoding='utf-8'))
 
 
 def archive(binary, output, version):

@@ -1,0 +1,175 @@
+{
+  "中国": {
+    "安徽": {
+      "安庆": ["Anqing"], "蚌埠": ["Bengbu"], "阜阳": ["Fuyang"], "合肥": ["Hefei"],
+      "黄山": ["Huangshan"], "马鞍山": ["Maanshan"], "芜湖": ["Wuhu"]
+    },
+    "福建": {
+      "福州": ["Fuzhou"], "龙岩": ["Longyan"], "莆田": ["Putian"], "泉州": ["Quanzhou"],
+      "三明": ["Sanming"], "厦门": ["Xiamen", "Amoy"], "漳州": ["Zhangzhou"]
+    },
+    "甘肃": {
+      "嘉峪关": ["Jiayuguan"], "酒泉": ["Jiuquan"], "兰州": ["Lanzhou"], "天水": ["Tianshui"], "张掖": ["Zhangye"]
+    },
+    "广东": {
+      "潮州": ["Chaozhou"], "东莞": ["Dongguan"], "佛山": ["Foshan"], "广州": ["Guangzhou", "Canton"],
+      "惠州": ["Huizhou"], "江门": ["Jiangmen"], "茂名": ["Maoming"], "梅州": ["Meizhou"],
+      "清远": ["Qingyuan"], "汕头": ["Shantou", "Swatow"], "汕尾": ["Shanwei"], "韶关": ["Shaoguan"],
+      "深圳": ["Shenzhen"], "湛江": ["Zhanjiang"], "肇庆": ["Zhaoqing"], "中山": ["Zhongshan"], "珠海": ["Zhuhai"]
+    },
+    "广西": {
+      "北海": ["Beihai"], "桂林": ["Guilin"], "柳州": ["Liuzhou"], "南宁": ["Nanning"], "梧州": ["Wuzhou"]
+    },
+    "贵州": {"安顺": ["Anshun"], "贵阳": ["Guiyang"], "六盘水": ["Liupanshui"], "遵义": ["Zunyi"]},
+    "海南": {"儋州": ["Danzhou"], "海口": ["Haikou"], "琼海": ["Qionghai"], "三亚": ["Sanya"]},
+    "河北": {
+      "保定": ["Baoding"], "沧州": ["Cangzhou"], "承德": ["Chengde"], "邯郸": ["Handan"],
+      "廊坊": ["Langfang"], "秦皇岛": ["Qinhuangdao"], "石家庄": ["Shijiazhuang"],
+      "唐山": ["Tangshan"], "邢台": ["Xingtai"], "张家口": ["Zhangjiakou"]
+    },
+    "河南": {
+      "安阳": ["Anyang"], "开封": ["Kaifeng"], "洛阳": ["Luoyang"], "南阳": ["Nanyang"],
+      "商丘": ["Shangqiu"], "新乡": ["Xinxiang"], "许昌": ["Xuchang"], "郑州": ["Zhengzhou"]
+    },
+    "黑龙江": {
+      "大庆": ["Daqing"], "哈尔滨": ["Harbin", "Haerbin"], "鹤岗": ["Hegang"], "佳木斯": ["Jiamusi"],
+      "牡丹江": ["Mudanjiang"], "齐齐哈尔": ["Qiqihar"], "绥化": ["Suihua"]
+    },
+    "湖北": {
+      "恩施": ["Enshi"], "黄冈": ["Huanggang"], "黄石": ["Huangshi"], "荆州": ["Jingzhou"],
+      "十堰": ["Shiyan"], "武汉": ["Wuhan"], "襄阳": ["Xiangyang", "Xiangfan"], "孝感": ["Xiaogan"],
+      "宜昌": ["Yichang"]
+    },
+    "湖南": {
+      "常德": ["Changde"], "长沙": ["Changsha"], "郴州": ["Chenzhou"], "衡阳": ["Hengyang"],
+      "怀化": ["Huaihua"], "湘潭": ["Xiangtan"], "岳阳": ["Yueyang"], "张家界": ["Zhangjiajie"], "株洲": ["Zhuzhou"]
+    },
+    "吉林": {
+      "长春": ["Changchun"], "吉林": ["Jilin", "Jilin City"], "四平": ["Siping"],
+      "松原": ["Songyuan"], "通化": ["Tonghua"], "延吉": ["Yanji"]
+    },
+    "江苏": {
+      "常州": ["Changzhou"], "淮安": ["Huai'an"], "连云港": ["Lianyungang"], "南京": ["Nanjing", "Nanking"],
+      "南通": ["Nantong"], "苏州": ["Suzhou"], "宿迁": ["Suqian"], "泰州": ["Taizhou"],
+      "无锡": ["Wuxi"], "徐州": ["Xuzhou"], "盐城": ["Yancheng"], "扬州": ["Yangzhou"], "镇江": ["Zhenjiang"]
+    },
+    "江西": {
+      "抚州": ["Fuzhou"], "赣州": ["Ganzhou"], "吉安": ["Ji'an"], "景德镇": ["Jingdezhen"],
+      "九江": ["Jiujiang"], "南昌": ["Nanchang"], "上饶": ["Shangrao"], "宜春": ["Yichun"]
+    },
+    "辽宁": {
+      "鞍山": ["Anshan"], "大连": ["Dalian"], "丹东": ["Dandong"], "抚顺": ["Fushun"],
+      "锦州": ["Jinzhou"], "盘锦": ["Panjin"], "沈阳": ["Shenyang"], "营口": ["Yingkou"]
+    },
+    "内蒙古": {
+      "包头": ["Baotou"], "赤峰": ["Chifeng"], "鄂尔多斯": ["Ordos", "Eerduosi"],
+      "呼和浩特": ["Hohhot", "Huhehaote"], "呼伦贝尔": ["Hulunbuir"], "通辽": ["Tongliao"], "乌兰察布": ["Ulanqab"]
+    },
+    "宁夏": {"固原": ["Guyuan"], "石嘴山": ["Shizuishan"], "吴忠": ["Wuzhong"], "银川": ["Yinchuan"], "中卫": ["Zhongwei"]},
+    "青海": {"德令哈": ["Delingha"], "格尔木": ["Golmud", "Geermu"], "海东": ["Haidong"], "西宁": ["Xining"]},
+    "山东": {
+      "滨州": ["Binzhou"], "德州": ["Dezhou"], "东营": ["Dongying"], "济南": ["Jinan"],
+      "济宁": ["Jining"], "聊城": ["Liaocheng"], "临沂": ["Linyi"], "青岛": ["Qingdao", "Tsingtao"],
+      "日照": ["Rizhao"], "泰安": ["Tai'an"], "威海": ["Weihai"], "潍坊": ["Weifang"],
+      "烟台": ["Yantai"], "枣庄": ["Zaozhuang"], "淄博": ["Zibo"]
+    },
+    "山西": {
+      "长治": ["Changzhi"], "大同": ["Datong"], "晋城": ["Jincheng"], "临汾": ["Linfen"],
+      "太原": ["Taiyuan"], "阳泉": ["Yangquan"], "运城": ["Yuncheng"]
+    },
+    "陕西": {
+      "安康": ["Ankang"], "宝鸡": ["Baoji"], "汉中": ["Hanzhong"], "渭南": ["Weinan"],
+      "西安": ["Xi'an"], "咸阳": ["Xianyang"], "延安": ["Yan'an"], "榆林": ["Yulin"]
+    },
+    "四川": {
+      "成都": ["Chengdu"], "达州": ["Dazhou"], "德阳": ["Deyang"], "乐山": ["Leshan"],
+      "泸州": ["Luzhou"], "眉山": ["Meishan"], "绵阳": ["Mianyang"], "南充": ["Nanchong"],
+      "攀枝花": ["Panzhihua"], "遂宁": ["Suining"], "宜宾": ["Yibin"], "自贡": ["Zigong"]
+    },
+    "西藏": {"拉萨": ["Lhasa", "Lasa"], "林芝": ["Nyingchi", "Linzhi"], "日喀则": ["Shigatse", "Rikaze"]},
+    "新疆": {
+      "阿克苏": ["Aksu"], "哈密": ["Hami", "Kumul"], "喀什": ["Kashgar", "Kashi"],
+      "克拉玛依": ["Karamay", "Kelamayi"], "库尔勒": ["Korla", "Kuerle"], "石河子": ["Shihezi"],
+      "吐鲁番": ["Turpan", "Tulufan"], "乌鲁木齐": ["Ürümqi", "Urumchi", "Wulumuqi"], "伊宁": ["Yining", "Ghulja"]
+    },
+    "云南": {
+      "保山": ["Baoshan"], "楚雄": ["Chuxiong"], "大理": ["Dali", "Dali City"], "景洪": ["Jinghong"],
+      "昆明": ["Kunming"], "丽江": ["Lijiang"], "普洱": ["Pu'er"], "曲靖": ["Qujing"], "玉溪": ["Yuxi"]
+    },
+    "浙江": {
+      "杭州": ["Hangzhou", "Hangchow"], "湖州": ["Huzhou"], "嘉兴": ["Jiaxing"], "金华": ["Jinhua"],
+      "丽水": ["Lishui"], "宁波": ["Ningbo"], "衢州": ["Quzhou"], "绍兴": ["Shaoxing"], "台州": ["Taizhou"],
+      "温州": ["Wenzhou"], "义乌": ["Yiwu"], "舟山": ["Zhoushan"]
+    }
+  },
+  "美国": {
+    "阿拉巴马州": {"伯明翰": ["Birmingham"], "亨茨维尔": ["Huntsville"], "蒙哥马利": ["Montgomery"]},
+    "阿拉斯加州": {"安克雷奇": ["Anchorage"], "费尔班克斯": ["Fairbanks"], "朱诺": ["Juneau"]},
+    "阿肯色州": {"费耶特维尔": ["Fayetteville"], "小石城": ["Little Rock"]},
+    "艾奥瓦州": {"得梅因": ["Des Moines"], "锡达拉皮兹": ["Cedar Rapids"]},
+    "北卡罗来纳州": {"达勒姆": ["Durham"], "罗利": ["Raleigh"], "夏洛特": ["Charlotte"]},
+    "宾夕法尼亚州": {"费城": ["Philadelphia", "費城"], "匹兹堡": ["Pittsburgh"]},
+    "得克萨斯州": {
+      "奥斯汀": ["Austin"], "达拉斯": ["Dallas"], "埃尔帕索": ["El Paso"], "沃思堡": ["Fort Worth", "沃斯堡"],
+      "普莱诺": ["Plano"], "圣安东尼奥": ["San Antonio"], "休斯敦": ["Houston", "休斯顿"], "欧文": ["Irving"]
+    },
+    "俄亥俄州": {"代顿": ["Dayton"], "哥伦布": ["Columbus"], "克利夫兰": ["Cleveland"], "辛辛那提": ["Cincinnati"]},
+    "俄克拉何马州": {"俄克拉何马城": ["Oklahoma City", "奥克拉荷马城"], "塔尔萨": ["Tulsa"]},
+    "俄勒冈州": {
+      "比弗顿": ["Beaverton"], "波特兰": ["Portland"], "希尔斯伯勒": ["Hillsboro"], "尤金": ["Eugene"]
+    },
+    "佛罗里达州": {
+      "奥兰多": ["Orlando"], "杰克逊维尔": ["Jacksonville"], "劳德代尔堡": ["Fort Lauderdale"],
+      "迈阿密": ["Miami", "邁阿密"], "坦帕": ["Tampa"], "塔拉哈西": ["Tallahassee"]
+    },
+    "弗吉尼亚州": {
+      "阿什本": ["Ashburn", "阿什伯恩"], "阿灵顿": ["Arlington"], "弗吉尼亚比奇": ["Virginia Beach"],
+      "里士满": ["Richmond", "里奇蒙"], "雷斯顿": ["Reston"], "赫恩登": ["Herndon"]
+    },
+    "华盛顿州": {
+      "贝尔维尤": ["Bellevue", "贝尔维", "貝爾維尤"], "雷德蒙德": ["Redmond", "雷德蒙"],
+      "斯波坎": ["Spokane"], "塔科马": ["Tacoma"], "西雅图": ["Seattle", "西雅圖"]
+    },
+    "华盛顿特区": {"华盛顿": ["Washington", "Washington DC", "Washington D.C.", "華盛頓"]},
+    "加利福尼亚州": {
+      "阿纳海姆": ["Anaheim"], "奥克兰": ["Oakland", "奧克蘭"], "帕洛阿尔托": ["Palo Alto", "帕罗奥图"],
+      "伯克利": ["Berkeley", "柏克莱"], "弗里蒙特": ["Fremont"], "弗雷斯诺": ["Fresno"],
+      "旧金山": ["San Francisco", "City of San Francisco", "City and County of San Francisco", "三藩", "三藩市", "三番市", "舊金山", "圣弗朗西斯科", "聖弗朗西斯科"],
+      "库比蒂诺": ["Cupertino", "库珀蒂诺", "庫比蒂諾"], "洛杉矶": ["Los Angeles", "洛杉磯"],
+      "欧文": ["Irvine", "尔湾", "爾灣"], "河滨": ["Riverside", "里弗赛德"], "长滩": ["Long Beach", "長灘"],
+      "萨克拉门托": ["Sacramento", "沙加缅度"], "山景城": ["Mountain View", "芒廷维尤", "芒廷維尤"],
+      "森尼韦尔": ["Sunnyvale", "桑尼维尔"], "圣迭戈": ["San Diego", "圣地亚哥", "聖地牙哥"],
+      "圣何塞": ["San Jose", "San José", "圣荷西", "聖荷西"], "圣克拉拉": ["Santa Clara", "桑塔克拉拉"],
+      "圣马特奥": ["San Mateo", "圣马刁"], "圣莫尼卡": ["Santa Monica", "圣塔莫尼卡"],
+      "红木城": ["Redwood City", "雷德伍德城"]
+    },
+    "堪萨斯州": {"堪萨斯城": ["Kansas City"], "威奇托": ["Wichita"]},
+    "肯塔基州": {"列克星敦": ["Lexington"], "路易斯维尔": ["Louisville", "路易维尔"]},
+    "科罗拉多州": {"博尔德": ["Boulder"], "丹佛": ["Denver"], "科罗拉多斯普林斯": ["Colorado Springs"]},
+    "康涅狄格州": {"哈特福德": ["Hartford"], "纽黑文": ["New Haven"]},
+    "路易斯安那州": {"巴吞鲁日": ["Baton Rouge"], "新奥尔良": ["New Orleans", "紐奧良", "纽奥良"]},
+    "罗得岛州": {"普罗维登斯": ["Providence"]},
+    "马里兰州": {"巴尔的摩": ["Baltimore"], "罗克维尔": ["Rockville"]},
+    "马萨诸塞州": {"波士顿": ["Boston", "波士頓"], "剑桥": ["Cambridge", "劍橋"], "伍斯特": ["Worcester"]},
+    "密歇根州": {"安娜堡": ["Ann Arbor"], "底特律": ["Detroit"], "大急流城": ["Grand Rapids"]},
+    "密苏里州": {"堪萨斯城": ["Kansas City"], "圣路易斯": ["St. Louis", "Saint Louis"]},
+    "明尼苏达州": {"明尼阿波利斯": ["Minneapolis", "明尼亚波利斯"], "圣保罗": ["St. Paul", "Saint Paul"]},
+    "南卡罗来纳州": {"查尔斯顿": ["Charleston"], "哥伦比亚": ["Columbia"]},
+    "内布拉斯加州": {"奥马哈": ["Omaha"], "林肯": ["Lincoln"]},
+    "内华达州": {"拉斯维加斯": ["Las Vegas", "拉斯維加斯"], "里诺": ["Reno"]},
+    "纽约州": {
+      "奥尔巴尼": ["Albany"], "布法罗": ["Buffalo", "水牛城"], "罗切斯特": ["Rochester"], "纽约": ["New York", "New York City", "紐約"]
+    },
+    "缅因州": {"波特兰": ["Portland"]},
+    "威斯康星州": {"麦迪逊": ["Madison"], "密尔沃基": ["Milwaukee", "密尔瓦基"]},
+    "夏威夷州": {"檀香山": ["Honolulu", "火奴鲁鲁", "火奴魯魯"]},
+    "新泽西州": {"泽西城": ["Jersey City"], "纽瓦克": ["Newark"], "普林斯顿": ["Princeton"]},
+    "新墨西哥州": {"阿尔伯克基": ["Albuquerque"], "圣菲": ["Santa Fe"]},
+    "亚利桑那州": {"菲尼克斯": ["Phoenix", "凤凰城", "鳳凰城"], "斯科茨代尔": ["Scottsdale"], "图森": ["Tucson"]},
+    "伊利诺伊州": {"奥罗拉": ["Aurora"], "斯普林菲尔德": ["Springfield"], "芝加哥": ["Chicago"]},
+    "印第安纳州": {"韦恩堡": ["Fort Wayne"], "印第安纳波利斯": ["Indianapolis"]},
+    "犹他州": {"普罗沃": ["Provo"], "盐湖城": ["Salt Lake City", "鹽湖城"]},
+    "佐治亚州": {"萨凡纳": ["Savannah"], "亚特兰大": ["Atlanta", "亞特蘭大"]},
+    "田纳西州": {"查塔努加": ["Chattanooga"], "孟菲斯": ["Memphis"], "纳什维尔": ["Nashville"]}
+  }
+}

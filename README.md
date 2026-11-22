@@ -5,16 +5,18 @@
 
 ## 按操作系统下载
 
-| 操作系统 | 下载 |
-| --- | --- |
-| macOS 14+ | [![下载 Apple Silicon（ARM64）版](https://img.shields.io/badge/tar.gz-Apple%20Silicon-000000.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor-0.3.0-macos-arm64.tar.gz)<br>[![下载 Intel（x86_64）版](https://img.shields.io/badge/tar.gz-Intel%20x64-00A9E0.svg?logo=apple&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor-0.3.0-macos-x86_64.tar.gz) |
-| Linux（Debian 11+ / Ubuntu 20.04+） | [![下载 Linux amd64 版](https://img.shields.io/badge/deb-amd64-A81D33.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor_0.3.0-1_amd64.deb)<br>[![下载 Linux arm64 版](https://img.shields.io/badge/deb-arm64-D70A53.svg?logo=debian&logoColor=white)](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/network-monitor_0.3.0-1_arm64.deb) |
+按操作系统和架构选择对应的安装包。[下载最新正式版](https://github.com/Verdient/network-monitor/releases/latest)
+
+| 操作系统 | 架构 | 文件名结尾 |
+| --- | --- | --- |
+| macOS 14+ | Apple Silicon / Intel | `-macos-arm64.tar.gz` / `-macos-x86_64.tar.gz` |
+| Linux（Debian 11+ / Ubuntu 20.04+） | amd64 / arm64 | `_amd64.deb` / `_arm64.deb` |
 
 macOS 的 tar.gz 下载包解压后，运行 `./network-monitor monitor` 开始采集，运行 `./network-monitor stats` 查看统计。请把 `network-monitor-runtime` 目录与可执行文件保留在同一目录。
 Linux 下载 deb 安装包后，按下面的步骤安装。
-可使用同一版本的 [SHA256SUMS](https://github.com/Verdient/network-monitor/releases/download/v0.3.0/SHA256SUMS) 校验下载文件。
+可使用发布页中同一版本的 `SHA256SUMS` 校验下载文件。
 
-完整更新记录：[ChangeLog](CHANGELOG.md)。
+完整更新记录：[ChangeLog](https://github.com/Verdient/network-monitor/blob/main/CHANGELOG.md)。
 
 ## 安装
 
@@ -57,19 +59,15 @@ sudo apt install network-monitor
 
 ### Linux：直接安装 deb
 
-支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。用 `dpkg --print-architecture` 查看架构，
-下载对应的 deb 文件，然后在下载目录运行：
+支持 Debian 11+、Ubuntu 20.04+ 的 amd64 和 arm64 系统。用 `dpkg --print-architecture` 查看架构，再下载对应的安装包。[下载最新正式版](https://github.com/Verdient/network-monitor/releases/latest)
+
+在下载目录运行以下命令，将示例文件名替换为实际下载的文件名。
 
 ```bash
-# amd64（常见 Intel / AMD 64 位机器）
-sudo apt install ./network-monitor_0.3.0-1_amd64.deb
-
-# arm64（64 位 ARM 机器）
-sudo apt install ./network-monitor_0.3.0-1_arm64.deb
+sudo apt install './下载的文件名.deb'
 ```
 
-两条命令按架构选择一条即可，无需安装 Python。使用 systemd 的系统会自动启动采集并设置开机启动。
-安装包已包含服务，使用 `systemctl` 管理即可。
+安装包包含独立可执行文件和 systemd 服务。使用 systemd 的系统会自动启动采集并设置开机启动。
 
 ## 开始采集
 
@@ -97,7 +95,7 @@ network-monitor stats
 
 在终端中，宽屏左侧显示下载、上传和合计，右侧显示同一时段的波形。实时采样时大号数字显示当前网速，查历史时显示累计流量。缩小窗口后，统计移到波形上方。流量占比按所查时段的累计字节数计算。
 
-青色下载画在零线上方，粉色上传画在下方，两侧独立标尺，速率越高颜色越浅。箭头标出每个方向最高的分段平均速率，空间足够时还会显示该段的起止时间。零线上的琥珀色虚线 `┄` 表示该段缺少采样，实测速率为零时，波形贴着零线。
+青色下载画在零线上方，粉色上传画在下方，两侧独立标尺，波形用不同色阶区分速率。箭头标出每个方向最高的分段平均速率，空间足够时还会显示该段的起止时间。零线上的琥珀色虚线 `┄` 表示该段缺少采样，实测速率为零时，波形贴着零线。
 
 ```bash
 network-monitor --last 15m
@@ -109,7 +107,7 @@ network-monitor --last 15m
 
 默认从启动当天的零点开始。使用 `network-monitor --last 15m` 时，从启动前 15 分钟开始，之后持续显示从该起点累积到现在的数据。
 
-实时模式默认每秒更新一次。按 `+` 将刷新间隔延长 0.1 秒，按 `-` 将间隔缩短 0.1 秒，最短间隔为 0.1 秒。底栏显示当前间隔，也可以在启动时指定。
+实时模式默认每秒更新一次。点击底栏按钮或按对应的键即可操作。`+` 将刷新间隔延长 0.1 秒，`-` 将间隔缩短 0.1 秒，最短间隔为 0.1 秒。当前间隔显示在两个按钮之间，也可以在启动时指定。
 
 ```bash
 network-monitor --last 15m --interval 0.5
@@ -117,14 +115,33 @@ network-monitor --last 15m --interval 0.5
 
 拉高实时窗口会增加波形的绘图行数，快捷键始终位于底部。按 `c` 切到本机 TCP 连接，再按一次回到所选网卡的流量。切换视图期间采样照常进行。
 
-连接页显示已建立、监听、TIME_WAIT 和其他状态的套接字数量。对端列表同时包含 IPv4 和 IPv6，按每个 IP 的已建立连接数排序。列表跨页时，用 `j` 下一页、`k` 上一页。趋势图显示最近最多 120 次读取的已建立连接数。Linux 读取当前网络命名空间的连接表，macOS 读取本机连接表。连接信息只保存在本次实时会话中。
+连接页显示已建立、监听、TIME_WAIT 和其他状态的套接字数量。对端列表同时包含 IPv4 和 IPv6，按每个 IP 的已建立连接数排序。列表跨页时，按 `p` 上一页、`n` 下一页。连接数折线的纵轴上限取峰值的 1.25 倍并向上取整，图中标出峰值和采样时间。新采样从右侧进入，铺到左侧后按时间均分整个会话，每列保留该时段的最高连接数，最右列显示最新采样。Linux 读取当前网络命名空间的连接表，macOS 读取本机连接表。连接信息只保存在本次实时会话中。
 
-按 `i` 查看所选网卡上各对端 IPv4、IPv6 的下载速率、上传速率和双向累计流量。列表按当前双向速率之和排序，按 `j`、`k` 翻页，再按 `i` 返回。首次打开此页开始计数，切换页面继续累计，退出时清除。流量按 IP 包长度计算，包含 IP 头。
+窗口有足够空间且抓包成功时，实时主页在网速趋势下方显示 IP 流量表。按 `i` 可打开独立 IP 页，查看所选网卡上各对端 IPv4、IPv6 的下载速率、上传速率和双向累计流量。默认按当前双向速率之和排序。点击任一列表头按该列排序，再点一次切换升降序。点击 IP 流量框底部的「上页」或「下页」翻页，也可按 `p` 或 `n`。在独立页再按 `i` 返回。两处共用同一份采样，首次显示主页的 IP 表或打开独立 IP 页时开始计数，切换页面继续累计，退出时清除。流量按 IP 包长度计算，包含 IP 头。
 
-IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。
+IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。IP、地域、运营商、AS 号和 DNS 反查域名按顺序显示，颜色逐级减淡。AS 号由地域数据源在同一请求中提供，例如 `AS45102`。地址栏空间不足时，附加信息放在下一行。
+
+IPv4 私有网段、IPv6 唯一本地网段和链路本地地址直接标记为「局域网」。程序在后台通过 HTTPS 将当前页的公网对端 IP 发送给地域数据源，以查询地域和运营商。遇到限流、错误或信息不足时，按表中顺序尝试下一个来源。中国大陆 IP 有城市信息时显示为「杭州·浙江·中国」，缺少城市时显示为「浙江·中国」。直辖市和港澳台显示为「北京·中国」「香港·中国」「澳门·中国」「台湾·中国」等。美国 IP 显示为「山景城·加利福尼亚·美国」，缺少城市或州时逐级简化。其他国家显示中文国家名称。
+
+中国大陆和美国的常见城市按省或州匹配本地别名。例如，`San Francisco` 和「三藩市」都显示为「旧金山」。地域和运营商的繁体中文通过内置 OpenCC 词典转成简体，已有缓存也会在读取时转换。[城市映射表](https://github.com/Verdient/network-monitor/blob/main/geo_data/cities.zh.json) · [OpenCC 1.1.9](https://github.com/BYVoid/OpenCC/tree/ver.1.1.9) · [OpenCC 许可证](https://github.com/Verdient/network-monitor/blob/main/geo_data/opencc/LICENSE)
+
+| 数据源 | 程序限额（滚动 24 小时） | 最短间隔 | 说明 |
+| --- | ---: | ---: | --- |
+| ipwho.is | 900 次 | 1 秒 | [官方文档](https://ipwhois.io/documentation) |
+| GeoJS | 250 次 | 2 秒 | [服务条款](https://www.geojs.io/tos/) |
+| FreeIPAPI | 300 次 | 2 秒 | [官方限额](https://freeipapi.com/rate-limit) |
+| IPQuery | 200 次 | 2 秒 | [官方文档](https://ipquery.io/developers/api) |
+| IP2Location.io | 900 次 | 2 秒 | [官方文档](https://www.ip2location.io/ip2location-documentation) |
+| Country.is | 150 次 | 2 秒 | 仅补充国家 [官方文档](https://country.is/) |
+
+**Network Monitor uses IP2Location.io [IP geolocation](https://www.ip2location.io) web service.**
+
+查询结果在本机缓存 30 天。各来源均查不到的结果缓存 24 小时，超时或限流按服务状态重试。缓存和请求记录共用当前用户的 `network-monitor/ip-location.sqlite3`，Linux 位于 `XDG_CACHE_HOME`（默认 `~/.cache`），macOS 位于 `~/Library/Caches`。收到 HTTP 429 时按 `Retry-After` 暂停对应来源，IP2Location.io 的无密钥额度用尽时暂停至下一个 UTC 零点。中文国家名称来自 Unicode CLDR 48，随程序附带许可证。[CLDR 48](https://github.com/unicode-org/cldr-json/tree/48.0.0) · [Unicode 许可证](https://github.com/Verdient/network-monitor/blob/main/geo_data/LICENSE.unicode)
 
 按 `q` 退出。`--last` 支持秒 `s`、分钟 `m`、小时 `h` 和天 `d`，可单独使用。
 使用 `network-monitor stats --plain` 可输出纯文本统计。`network-monitor stats` 重定向输出时也默认使用纯文本。设置 `NO_COLOR=1` 可保留仪表盘并关闭颜色。
+
+仪表盘沿用终端背景，并尝试读取背景色来调整配色。读取不到时，文字沿用终端前景色，图表使用兼顾浅色和深色主题的配色。底栏按钮和 IP 表中可用的翻页按钮带底色。
 
 ### 选择网卡
 
@@ -139,10 +156,10 @@ network-monitor stats -i en0
 
 ### 选择日期或时间范围
 
-查询一天的数据：
+用 `-d` 或 `--day` 查询所选时区从当天零点到次日零点的数据。
 
 ```bash
-network-monitor stats --start 2026-11-18 --end 2026-11-19
+network-monitor stats -d 2026-11-18
 ```
 
 查询一天中的部分时段：
@@ -152,7 +169,20 @@ network-monitor stats --start '2026-11-18 09:00:00' --end '2026-11-18 18:00:00'
 ```
 
 开始时间包含在范围内，结束时间不包含。也支持 Unix 秒时间戳。
-查询历史数据时，请同时指定 `--start` 和 `--end`。
+查询其他历史时段时，请同时指定 `--start` 和 `--end`。
+
+### 按周期汇总流量
+
+`--traffic` 按周期显示下载、上传和合计流量。默认按天统计最近 15 个周期，包含当前周期。也可选 `hour`、`minute`、`second` 或 `month`，分别默认显示 24 小时、60 分钟、60 秒和 12 个月。用 `--count` 调整周期数量。
+
+```bash
+network-monitor stats --traffic
+network-monitor stats --traffic hour --count 48
+network-monitor stats --traffic hour --day 2026-11-18 --tz Asia/Shanghai
+network-monitor stats --traffic month --end 2026-11-01
+```
+
+周期按所选时区划分。可用 `--day`、`--last` 或 `--start` / `--end` 限定汇总范围，表中最多显示该范围内最近的 `--count` 个周期。`—` 表示该周期没有采样数据。
 
 ### 选择时区与显示方式
 
@@ -231,7 +261,7 @@ network-monitor stats -c ./config.ini --tz UTC
 network-monitor monitor -i en0 en1 -d ./traffic.db --interval 1 --count 60
 
 # 查看这次采集的数据
-network-monitor stats -d ./traffic.db -i en0
+network-monitor stats --database ./traffic.db -i en0
 ```
 
 省略 `--count` 会持续运行。相对数据库路径以执行命令时的目录为准。
@@ -298,9 +328,7 @@ sudo apt update
 sudo apt install --only-upgrade network-monitor
 ```
 
-直接安装 deb 的用户，也可以从 [Releases](https://github.com/Verdient/network-monitor/releases/latest) 下载新版本对应架构的 deb，
-再运行 `sudo apt install ./下载的文件名.deb`。升级会保留配置和历史数据，并重启正在运行的采集服务；
-已停止或禁用的服务不会被自动启动。
+直接安装 deb 的用户可以下载新版本对应架构的安装包，再运行 `sudo apt install './下载的文件名.deb'`。升级会保留配置、历史数据和服务的启用状态，并重启正在运行的采集服务。[下载最新正式版](https://github.com/Verdient/network-monitor/releases/latest)
 
 Linux 卸载：
 
@@ -319,4 +347,4 @@ network-monitor stats -h
 ```
 
 问题与建议请提交到 [Issues](https://github.com/Verdient/network-monitor/issues)。
-项目使用 [0BSD 许可证](LICENSE)。
+项目使用 [0BSD 许可证](https://github.com/Verdient/network-monitor/blob/main/LICENSE)。

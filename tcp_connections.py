@@ -1,5 +1,5 @@
 """Read local TCP socket tables for the live dashboard."""
-from collections import Counter, deque
+from collections import Counter
 from dataclasses import dataclass
 from ipaddress import ip_address
 import os
@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,8 @@ class ConnectionReader:
     def __init__(self):
         self.worker = None
         self.changed = threading.Event()
-        self.history = deque(maxlen=120)
+        self.history = []
+        self.wall_time_offset = time.time() - time.monotonic()
         self.frame = Connections(status='读取中'), ()
 
     def refresh(self):
@@ -99,6 +101,7 @@ class ConnectionReader:
 
     def _read(self):
         snapshot = read_connections()
-        self.history.append(None if snapshot.status else snapshot.established)
+        timestamp = self.wall_time_offset + time.monotonic()
+        self.history.append((timestamp, None if snapshot.status else snapshot.established))
         self.frame = snapshot, tuple(self.history)
         self.changed.set()

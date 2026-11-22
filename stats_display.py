@@ -1,25 +1,49 @@
 """Render a terminal dashboard without terminal or database dependencies."""
 
+from bisect import bisect_left
 from dataclasses import dataclass
+from ipaddress import ip_address
 from itertools import groupby, zip_longest
 import math
 import re
 import unicodedata
 
-from time_ranges import local_datetime
+from time_ranges import local_datetime, timezone_label
 
 
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
+BRAILLE_DOTS = ((1, 2, 4, 64), (8, 16, 32, 128))
 COLORS = {
     'frame': '38;2;105;102;153', 'grid': '38;2;81;85;112', 'muted': '38;2;169;175;201',
     'ink': '1;38;2;238;244;255', 'down': '1;38;2;79;248;238',
     'up': '1;38;2;255;105;203', 'total': '1;38;2;255;207;107',
+    'peer_location': '38;2;204;210;231', 'peer_carrier': '38;2;169;175;201',
+    'peer_asn': '38;2;156;162;184', 'peer_name': '38;2;139;145;168',
 }
-BACKGROUNDS = {'ink': '48;2;16;18;37', 'down': '48;2;10;35;47',
-               'up': '48;2;41;20;45', 'total': '48;2;40;31;37'}
 BASIC = {
     'frame': '90', 'grid': '90', 'muted': '37', 'ink': '1;37', 'down': '1;36',
     'up': '1;35', 'total': '1;33',
+    'peer_location': '39', 'peer_carrier': '2;39', 'peer_asn': '90', 'peer_name': '2;90',
+}
+LIGHT_COLORS = {
+    'frame': ((75, 75, 108), 60), 'grid': ((95, 95, 119), 59),
+    'down': ((0, 87, 117), 24), 'up': ((135, 0, 95), 89), 'total': ((135, 95, 0), 94),
+    'peer_location': ((66, 71, 85), 238), 'peer_carrier': ((95, 100, 115), 241),
+    'peer_asn': ((105, 110, 125), 242), 'peer_name': ((116, 120, 133), 243),
+}
+LIGHT_WAVES = {
+    'down': (((0, 126, 148), 31), ((0, 81, 107), 24)),
+    'up': (((165, 79, 128), 132), ((123, 26, 83), 89)),
+}
+PORTABLE_COLORS = {
+    'frame': ((123, 119, 132), 244), 'grid': ((119, 119, 126), 243),
+    'down': ((0, 135, 140), 30), 'up': ((188, 76, 133), 132), 'total': ((171, 105, 0), 130),
+    'peer_carrier': ((142, 145, 159), 246), 'peer_asn': ((130, 133, 145), 244),
+    'peer_name': ((117, 117, 128), 243),
+}
+PORTABLE_WAVES = {
+    'down': (((0, 125, 135), 30), ((0, 142, 163), 31)),
+    'up': (((166, 78, 123), 132), ((194, 82, 145), 133)),
 }
 # Each stop pairs a true-color shade with its xterm-256 equivalent.
 WAVE_SHADES = {
@@ -32,6 +56,26 @@ WAVE_SHADES = {
 }
 DIRECTIONS = (('↓ 下载', 1, 'down'), ('↑ 上传', 0, 'up'), ('∑ 合计', 2, 'total'))
 CHANNELS = ('RX', 'TX', 'Σ')
+IP_COLUMNS = (
+    ('address', '对端 IP', 'IP'),
+    ('down_mbps', '↓ 下载速率', '↓速'), ('up_mbps', '↑ 上传速率', '↑速'),
+    ('download', '↓ 累计下载', '↓量'), ('upload', '↑ 累计上传', '↑量'),
+)
+CARRIER_ALIASES = tuple(
+    (re.compile(pattern, re.IGNORECASE), label)
+    for pattern, label in (
+        (r'中国移动|\b(?:China[ -]*Mobile|CMNET|CMCC)\b', '中国移动'),
+        (r'中国联通|\b(?:China[ -]*Unicom|China United Network Communications|China169|CUCC)\b', '中国联通'),
+        (r'中国电信|\b(?:China[ -]*Telecom|ChinaNet)\b', '中国电信'),
+        (r'中国广电|\bChina[ -]*Broadnet\b', '中国广电'),
+        (r'中国教育和科研计算机网|\bCERNET\b', '教育网'),
+        (r'阿里云|\b(?:Aliyun|Alibaba (?:Cloud|\(?US\)? Technology|Advertising))\b', '阿里云'),
+        (r'腾讯云|\bTencent[ -]*Cloud\b', '腾讯云'),
+        (r'腾讯|\bTencent\b', '腾讯'),
+        (r'华为云|\bHuawei[ -]*Cloud\b', '华为云'),
+    )
+)
+SINGLE_PAGE = (0, 1)
 # Three terminal rows encode a five-pixel-high digit using half blocks.
 DIGITS = {
     '0': ('█▀█', '█ █', '▀▀▀'), '1': ('▄█ ', ' █ ', '▀▀▀'),
@@ -41,6 +85,7 @@ DIGITS = {
     '8': ('█▀█', '█▀█', '▀▀▀'), '9': ('█▀█', '▀▀█', '▀▀▀'),
     '.': (' ', ' ', '▀'),
 }
+BLOCK_MARK = (('█▄  █', '█▄ ▄█'), ('█ ▀▄█', '█ ▀ █'), ('█   █', '█   █'))
 
 
 def display_width(text):
@@ -70,6 +115,11 @@ def clip(text, width):
 
 def clean(text):
     return ''.join(char if char.isprintable() else '?' for char in str(text))
+
+
+def carrier_label(name):
+    text = re.sub(r'[\s_]+', ' ', name)
+    return next((label for pattern, label in CARRIER_ALIASES if pattern.search(text)), name)
 
 
 def traffic(value):
@@ -114,7 +164,7 @@ class LiveSample:
 
 
 def metric_rail_width(columns, rows, requested_width, requested_height):
-    # Three full-size cards need 27 rows, plus the header and live controls.
+    # Leave room for three full-size cards, the header, and live controls.
     rail = 36
     if columns >= 112 and rows >= 34 and requested_height is None:
         if requested_width is None or requested_width <= columns - rail - 1 - 12:
@@ -122,49 +172,72 @@ def metric_rail_width(columns, rows, requested_width, requested_height):
     return 0
 
 
+def ip_preview_fits(columns, rows, rail):
+    return rows >= 36 and columns - rail - bool(rail) >= 80
+
+
+def ip_preview_budget(space, height):
+    budget = min(space // 3, space - 5 - 2 * (height or 4))
+    return budget if budget >= 7 else 0
+
+
 class Dashboard:
-    def __init__(self, columns, color=False, truecolor=False, indexed=False, interval=1.0):
+    def __init__(self, columns, color=False, truecolor=False, indexed=False, interval=1.0,
+                 theme=None, zone=None):
         self.columns = columns
         self.interval = interval
         self.colors = (COLORS if truecolor else BASIC) if color else {}
         self.truecolor = color and truecolor
+        self.zone = zone
+        self.paging = SINGLE_PAGE
         self.title_ink = ''
-        if self.truecolor:
-            self.title_ink = '1;38;2;247;250;255;48;2;9;13;24'
-        elif color and indexed:
-            self.title_ink = '1;38;5;231;48;5;233'
-        elif color:
-            self.title_ink = '1;97;40'
+        if color:
+            if theme != 'dark':
+                accents = LIGHT_COLORS if theme == 'light' else PORTABLE_COLORS
+                self.colors = {role: ('1;39' if role == 'ink' else '39') for role in BASIC}
+                for role, (rgb, index) in accents.items():
+                    self.colors[role] = self.palette_color(rgb, index, indexed)
+                if not (self.truecolor or indexed):
+                    for role in ('peer_location', 'peer_carrier', 'peer_asn', 'peer_name'):
+                        self.colors[role] = BASIC[role]
+                self.title_ink = self.colors['ink']
+            elif self.truecolor:
+                self.title_ink = '1;38;2;247;250;255'
+            elif indexed:
+                self.title_ink = '1;38;5;231'
+            else:
+                self.title_ink = '1;97'
         self.wave_inks = {}
         for role, stops in WAVE_SHADES.items():
-            if self.truecolor:
-                inks = ['38;2;{};{};{}'.format(*rgb) for rgb, _ in stops]
-            elif color and indexed:
-                inks = ['38;5;{}'.format(index) for _, index in stops]
-            elif color:
+            if not color:
+                inks = [''] * len(stops)
+            elif theme != 'dark':
+                waves = LIGHT_WAVES if theme == 'light' else PORTABLE_WAVES
+                low, high = (self.palette_color(rgb, index, indexed) for rgb, index in waves[role])
+                inks = [low] * 4 + [high] * 4
+            elif self.truecolor or indexed:
+                inks = [self.palette_color(rgb, index, indexed) for rgb, index in stops]
+            else:
                 normal, bright = ('36', '96') if role == 'down' else ('35', '95')
                 inks = [normal] * 4 + [bright] * 4
-            else:
-                inks = [''] * len(stops)
             self.wave_inks[role] = inks
+
+    def palette_color(self, rgb, index, indexed):
+        if self.truecolor:
+            return '38;2;{};{};{}'.format(*rgb)
+        return '38;5;{}'.format(index) if indexed else '39'
 
     @staticmethod
     def tint(text, code):
         return '\033[{}m{}\033[0m'.format(code, text) if code and text else text
 
-    def paint(self, text, role, reverse=False):
+    def paint(self, text, role, bold=False, reverse=False):
         code = self.colors.get(role)
+        if code and bold and not code.startswith('1;'):
+            code = '1;' + code
         if code and reverse:
             code += ';7'
         return self.tint(text, code)
-
-    def surface(self, text, role):
-        if not self.colors:
-            return text
-        background = BACKGROUNDS[role] if self.truecolor else '40'
-        base = '\033[{};{}m'.format(background, self.colors['muted'])
-        # Inline accents reset SGR. Restore the panel background after each one.
-        return base + text.replace('\033[0m', '\033[0m' + base) + '\033[0m'
 
     def live_readings(self, sample, width):
         if sample.rates is None:
@@ -178,18 +251,22 @@ class Dashboard:
         return [self.paint(clip((prefix if i == 0 else indent) + text, width), role)
                 for i, (text, role) in enumerate(readings)]
 
-    def panel(self, title, lines, width=None, role='ink', detail='', detail_role='muted'):
+    def panel(self, title, lines, width=None, role='ink', detail='', detail_role='muted', accented=False):
         width = self.columns if width is None else width
         frame = lambda text: self.paint(text, 'frame')
         title = ' {} '.format(clip(title, width - 8))
         room = width - 6 - display_width(title)
         trailer = ' {} '.format(detail) if detail and display_width(detail) + 3 <= room else ''
+        border_width = room - display_width(trailer)
+        accent = ''
+        if accented and border_width >= 32:
+            accent = self.paint('━╸', 'down') + self.paint('╱╱', 'up') + frame('──')
         top = (self.paint('┏━', role) + self.tint(title, self.title_ink) + self.paint('╲', role)
-               + frame('─' * (room - display_width(trailer))) + self.paint(trailer, detail_role)
+               + frame('─' * (border_width - display_width(accent))) + accent + self.paint(trailer, detail_role)
                + self.paint('╱╱┓', role))
         body = [frame('│') + ' ' + pad(line, width - 4) + ' ' + frame('│') for line in lines]
         bottom = frame('└' + '─' * (width - 4)) + self.paint('╴╱┘', role)
-        return [self.surface(line, role) for line in (top, *body, bottom)]
+        return [top, *body, bottom]
 
     def digits(self, reading, role, width):
         number, _, unit = reading.replace(',', '').partition(' ')
@@ -198,8 +275,9 @@ class Dashboard:
         rows = [' '.join(DIGITS[char][y] for char in number) for y in range(3)]
         if len(rows[0]) + len(unit) + 1 > width:
             return []
-        return [self.paint(row, role) + (self.paint(' ' + unit, 'ink') if y == 2 else '')
-                for y, row in enumerate(rows)]
+        lines = [self.paint(row, role) for row in rows]
+        lines[-1] += self.paint(' ' + unit, 'ink')
+        return lines
 
     def metrics(self, summary, compact=False, rates=None, big_readout=False, rail=0):
         totals = [traffic(v) for v in summary.totals] if summary.count else ['—'] * 3
@@ -214,7 +292,7 @@ class Dashboard:
             return [self.paint(label, 'muted') + pad(clip(value, width - 5), width - 4, right=True)
                     for label, value in values]
 
-        if self.columns >= 80:
+        if self.columns >= 78:
             cards = []
             widths = [rail] * 3 if rail else [(self.columns - 2 + i) // 3 for i in range(3)]
             for (label, i, role), width, code in zip(DIRECTIONS, widths, CHANNELS):
@@ -233,7 +311,8 @@ class Dashboard:
                     values = values[1:]
                 for key, value in values:
                     value = pad(clip(value, inside - 5), inside - 4, right=True)
-                    lines.append(self.paint(key, 'muted') + self.paint(value, role if not lines else 'ink'))
+                    primary = not lines
+                    lines.append(self.paint(key, 'muted') + self.paint(value, role if primary else 'ink', bold=primary))
                 cards.append(self.panel(label, lines, width=width, role=role, detail=detail, detail_role=role))
             if rail:
                 return [line for card in cards for line in card]
@@ -369,38 +448,63 @@ class Dashboard:
                           detail='{} {}'.format(interval_label, bucket))
 
     def connection_trend(self, history, inside, trace_rows):
-        lines = []
-        prefix = '已建立趋势  '
+        title = '已建立趋势'
+        peak = max((count for _, count in history if count is not None), default=None)
+        summary = '峰值 {}'.format(peak) if peak is not None else ''
         multi = trace_rows >= 4
-        axis_size = 2 + len(str(max((n for n in history if n is not None), default=0)))
+        limit = math.ceil(chart_scale(peak, live=True))
+        ceiling = str(limit)
+        prefix = title + '  '
+        if not multi and summary and display_width(prefix + summary) + 3 <= inside:
+            prefix += summary + '  '
+        axis_size = 2 + len(ceiling)
         trace_width = max(1, inside - (axis_size if multi else display_width(prefix)))
-        recent = history[-trace_width:]
-        peak = max((n for n in recent if n is not None), default=0) or 1
-        if multi:
-            heading = '已建立趋势'
-            if recent:
-                heading += '  ·  最近 {} 次'.format(len(recent))
-            lines.append(self.paint(clip(heading, inside), 'muted'))
-            values = [None] * (trace_width - len(recent)) + list(recent)
-            cells = area_cells(values, trace_rows - 1, peak, above=True)
-            for i, row in enumerate(cells):
-                label = str(peak) if i == 0 else '0' if i == len(cells) - 1 else ''
-                axis = self.paint(pad(label, axis_size - 1, True) + '│', 'frame')
-                trace = ''.join(cell or ' ' for cell in row)
-                band = round(7 * (1 - i / (len(cells) - 1)))
-                lines.append(axis + self.tint(trace, self.wave_inks['down'][band]))
-        else:
-            trace = ''.join(' ' if n is None else '▁▂▃▄▅▆▇█'[round(7 * n / peak)] for n in recent)
-            lines.append(self.paint(prefix, 'muted') + self.paint(pad(trace, trace_width, right=True), 'down'))
+        columns = connection_columns(history, trace_width)
+        values = [sample[1] if sample is not None else None for sample in columns]
+        traces = line_cells(values, trace_rows - 1 if multi else 1, limit)
+        if not multi:
+            return [self.paint(prefix, 'muted') + self.paint(''.join(cell or ' ' for cell in traces[0]), 'down')]
+
+        heading = title
+        if history:
+            heading += '  ·  {} 次'.format(len(history))
+        note = None
+        if peak is not None:
+            column = values.index(peak)
+            stamp = local_datetime(columns[column][0], self.zone)
+            start = local_datetime(history[0][0], self.zone)
+            end = local_datetime(history[-1][0], self.zone)
+            fmt = '%H:%M:%S' if start.date() == end.date() else '%m-%d %H:%M:%S'
+            if start.utcoffset() != end.utcoffset():
+                fmt += ' %z'
+            detail = summary + ' · ' + stamp.strftime(fmt)
+            edge = next(row for row, trace in enumerate(traces) if trace[column])
+            note = place_peak_note(traces, column, edge, True, (detail, summary))
+            if note is None:
+                heading = next((text for text in (title + '  ·  ' + detail, title + '  ' + summary)
+                                if display_width(text) <= inside), summary)
+
+        lines = [self.paint(clip(heading, inside), 'muted')]
+        for i, trace in enumerate(traces):
+            label = ceiling if i == 0 else '0' if i == len(traces) - 1 else ''
+            axis = self.paint(pad(label, axis_size - 1, True) + '│', 'frame')
+            text = ''.join(cell or ' ' for cell in trace)
+            if note and note[0] == i:
+                _, left, annotation = note
+                right = left + display_width(annotation)
+                lines.append(axis + self.paint(text[:left], 'down') + self.paint(annotation, 'total')
+                             + self.paint(text[right:], 'down'))
+            else:
+                lines.append(axis + self.paint(text, 'down'))
         return lines
 
     def connection_panel(self, connections, width, budget, page=0):
         if connections is None or budget < 3:
-            return [], False
+            return [], SINGLE_PAGE
         snapshot, history = connections
         inside = width - 4
         lines = []
-        pages = 1
+        paging = SINGLE_PAGE
         # Reserve the same rows while the first socket read is in flight and on read errors.
         groups = [('已建立', snapshot.established, 'down'), ('监听', snapshot.listening, 'ink'),
                   ('TIME_WAIT', snapshot.time_wait, 'up'), ('其他', snapshot.other, 'muted')]
@@ -423,7 +527,9 @@ class Dashboard:
         room = budget - len(lines) - 3
         if room >= 1 and snapshot.peers:
             pages = (len(snapshot.peers) + room - 1) // room
-            offset = (page % pages) * room
+            page = min(max(page, 0), pages - 1)
+            paging = page, pages
+            offset = page * room
             peers = snapshot.peers[offset:offset + room]
             digits = max(4, len(str(peers[0][1])))
             longest = max(len(addr) for addr, _ in peers)
@@ -448,25 +554,81 @@ class Dashboard:
             if not snapshot.status:
                 lines.append(self.paint('暂无已建立连接', 'muted'))
         lines.extend([''] * max(0, budget - 2 - len(lines)))
-        return self.panel('TCP 连接 · 本机', lines[:budget - 2], width=width, role='ink'), pages > 1
+        return self.panel('TCP 连接 · 本机', lines[:budget - 2], width=width, role='ink'), paging
 
-    def live_footer(self, view='traffic', paging=False):
+    def paint_button(self, text, role, enabled=True):
+        if enabled:
+            return self.paint(text, role, bold=True, reverse=True)
+        color = self.colors.get('frame')
+        return self.tint(text, '2;' + color if color else '')
+
+    def live_footer(self, row, view, paging, click_targets):
+        page, page_count = paging
         period = '{:g}s'.format(self.interval)
-        actions = [('q', '退出', 'total'),
-                   ('c', '返回' if view == 'connections' else '连接', 'up'),
-                   ('i', '返回' if view == 'ip' else 'IP', 'down'), ('+/-', period, 'ink')]
-        keys = '   '.join(self.paint(' ' + key + ' ', role, reverse=True) + ' ' + label
-                          for key, label, role in actions)
-        if paging:
-            keys += '   ' + self.paint(' j/k ', 'ink', reverse=True) + ' 翻页'
-        if display_width(keys) > self.columns:
-            return clip(period + ' +/-  q 退出  i IP  c 连接' + ('  j/k 翻页' if paging else ''), self.columns)
+        navigation = [('q', '退出', 'total'), ('c', '返回' if view == 'connections' else '连接', 'up'),
+                      ('i', '返回' if view == 'ip' else 'IP', 'down')]
+        pages = [('p', '上页', 'ink'), ('n', '下页', 'ink')] if view == 'connections' and page_count > 1 else []
+        disabled = {key for key, blocked in (('n', page == page_count - 1), ('p', page == 0)) if blocked}
+        interval = [('-', '', 'ink'), (None, period, 'muted'), ('+', '', 'ink')]
+        links = navigation + pages
+        label_width = sum(1 + display_width(label) for _, label, _ in links)
+        # The interval uses one space on either side of the reading.
+        full_width = len(period) + 8 + 6 * len(links) + label_width
+        compact = full_width > self.columns
+        actions = interval + links if compact else navigation + interval + pages
+        button_width = 3
+        show_labels = True
+        if compact:
+            button_count = len(actions) - 1
+            minimum_width = len(period) + 2 * button_count
+            if minimum_width + 2 * button_count > self.columns:
+                button_width = 1
+            show_labels = minimum_width + (button_width - 1) * button_count + label_width <= self.columns
+
+        parts = []
+        left = 0
+        for key, label, role in actions:
+            gap = 0 if not parts else 1 if compact or key in (None, '+') else 3
+            left += gap
+            if key is None:
+                text = self.paint(clip(label, self.columns - left), role)
+            else:
+                symbol = '·' if key in disabled and not self.colors else key
+                button = symbol + (' ' + label if show_labels and label else '')
+                if button_width == 3:
+                    button = ' ' + button + ' '
+                text = self.paint_button(button, role, enabled=key not in disabled)
+            right = left + display_width(text)
+            if right > self.columns:
+                break
+            parts.append(' ' * gap + text)
+            if key is not None and key not in disabled and click_targets is not None:
+                click_targets.append((row, left, right, key))
+            left = right
+        keys = ''.join(parts)
         spare = self.columns - display_width(keys)
         if spare >= 12:
             keys += '  ' + self.paint('╺' + '─' * (spare - 9) + '╴', 'frame') + self.paint('╱╱', 'up') + self.paint('╱╱╱', 'down')
         return keys
 
-    def live_body(self, report, rates, height, rail, space, connections):
+    def live_screen(self, lines, rows, view='traffic', paging=SINGLE_PAGE, click_targets=None):
+        self.paging = paging
+        body = lines[:rows - 1]
+        body.extend([''] * (rows - 1 - len(body)))
+        return '\n'.join(body + [self.live_footer(rows - 1, view, paging, click_targets)])
+
+    def live_body(self, report, rates, height, rail, space, connections, *, ip_capture=None,
+                  ip_page=0, ip_sort=None, click_targets=None, row_offset=0):
+        def append_ip(graph, width, budget, left, top):
+            if not budget:
+                return graph, SINGLE_PAGE
+            headers = [] if click_targets is not None else None
+            panel, paging = self.ip_panel(ip_capture, width, budget, ip_page, ip_sort, headers)
+            if click_targets is not None:
+                offset = row_offset + top + len(graph)
+                click_targets.extend((row + offset, lo + left, hi + left, column) for row, lo, hi, column in headers)
+            return graph + panel, paging
+
         summary = report.summary
         metrics = self.metrics(summary, rates=rates, big_readout=True, rail=rail)
         if rail and report.chart:
@@ -474,15 +636,20 @@ class Dashboard:
                 metrics = self.metrics(summary, compact=True, rates=rates, big_readout=True, rail=rail)
             sockets, _ = self.connection_panel(connections, rail, space - len(metrics))
             side = metrics + sockets
-            wave_rows = space - 5
-            graph = self.graph(report.chart, wave_rows // 2, report.zone, True, width=self.columns - rail - 1,
+            width = self.columns - rail - 1
+            budget = ip_preview_budget(space, height) if ip_capture is not None else 0
+            wave_rows = space - 5 - budget
+            graph = self.graph(report.chart, wave_rows // 2, report.zone, True, width=width,
                                extra_row=bool(wave_rows % 2))
-            return [pad(card, rail) + ' ' + line for card, line in zip_longest(side, graph, fillvalue='')]
+            right, paging = append_ip(graph, width, budget, rail + 1, 0)
+            return [pad(card, rail) + ' ' + line for card, line in zip_longest(side, right, fillvalue='')], paging
 
         if metrics and len(metrics) + 13 > space:
             metrics = self.metrics(summary, compact=True, rates=rates, big_readout=space >= 18)
         spare = space - len(metrics)
         if report.chart:
+            budget = ip_preview_budget(spare, height) if ip_capture is not None else 0
+            spare -= budget
             # At low heights keep the waveform legible. The c key always opens the peer list.
             reserved = min(spare // 3, max(0, spare - 13)) if height is None else spare - 5 - height * 2
             sockets, _ = self.connection_panel(connections, self.columns, reserved)
@@ -490,58 +657,212 @@ class Dashboard:
             if height is not None:
                 wave_rows = min(wave_rows, height * 2)
             if wave_rows >= 2:
-                metrics.extend(self.graph(report.chart, wave_rows // 2, report.zone, True,
-                                          extra_row=bool(wave_rows % 2)))
-                return metrics + sockets
+                graph = self.graph(report.chart, wave_rows // 2, report.zone, True, extra_row=bool(wave_rows % 2))
+                graphs, paging = append_ip(graph, self.columns, budget, 0, len(metrics))
+                return metrics + graphs + sockets, paging
         sockets, _ = self.connection_panel(connections, self.columns, space - len(metrics))
-        return metrics + sockets
+        return metrics + sockets, SINGLE_PAGE
 
-    def connection_screen(self, connections, rows, page):
+    def connection_screen(self, connections, rows, page, click_targets=None):
         if self.columns < 24 or rows < 4:
             snap = connections[0]
             lines = [clip(snap.status or 'TCP 已建立 {}'.format(snap.established), self.columns)]
-            paging = False
+            paging = SINGLE_PAGE
         else:
             lines, paging = self.connection_panel(connections, self.columns, rows - 1, page)
-        return '\n'.join((lines + [''] * max(0, rows - len(lines) - 1) + [self.live_footer('connections', paging)])[-rows:])
+        return self.live_screen(lines, rows, 'connections', paging, click_targets)
 
-    def ip_screen(self, capture, rows, page):
-        width = self.columns - 4
+    def ip_screen(self, capture, rows, page, sort=None, click_targets=None):
+        lines, paging = self.ip_panel(capture, self.columns, rows - 1, page, sort, click_targets)
+        return self.live_screen(lines, rows, 'ip', paging, click_targets)
+
+    def ip_page_controls(self, columns, row, page, pages, click_targets):
+        width = columns - 4
+        detail = ' {:>{}}/{} '.format(page + 1, len(str(pages)), pages)
+        labels = ('p 上页', 'n 下页')
+        if display_width(detail) + sum(display_width(label) + 2 for label in labels) > width:
+            labels = ('‹', '›')
+        padding = ' ' if display_width(detail) + 6 <= width else ''
+        button_width = display_width(labels[0]) + 2 * len(padding)
+        detail = clip(detail, width - 2 * button_width)
+        detail_width = display_width(detail)
+        spare = width - 2 * button_width - detail_width
+        left = spare // 2
+        buttons = []
+        for key, label, enabled, start in (('p', labels[0], page > 0, left + 1),
+                                           ('n', labels[1], page < pages - 1,
+                                            left + 1 + button_width + detail_width)):
+            if not enabled and not self.colors:
+                label = '·' + label[1:]
+            buttons.append(self.paint_button(padding + label + padding, 'ink', enabled))
+            if enabled and click_targets is not None:
+                click_targets.append((row, start, start + button_width, key))
+        previous, following = buttons
+        return (self.paint('└' + '─' * left, 'frame') + previous + self.paint(detail, 'muted') + following
+                + self.paint('─' * (spare - left), 'frame') + self.paint('╴╱┘', 'ink'))
+
+    def ip_address_line(self, address, fields, width):
+        text = self.paint(address, 'ink')
+        remaining = width - display_width(address)
+        for value, role in zip(fields, ('peer_location', 'peer_carrier', 'peer_asn', 'peer_name')):
+            space = '  ' if text else ''
+            room = remaining - len(space)
+            if not value or room < 3:
+                continue
+            if role == 'peer_asn' and len(value) > room:
+                continue
+            if role == 'peer_carrier':
+                asn, hostname = fields[2:]
+                if asn and room >= len(asn) + 5:
+                    room -= len(asn) + 2
+                if hostname and room >= 24:
+                    room -= min(12, display_width(hostname)) + 2
+            value = clip(clean(value), room)
+            remaining -= len(space) + display_width(value)
+            text += self.paint(space + value, role)
+        return text
+
+    def ip_panel(self, capture, columns, budget, page, sort=None, click_targets=None):
+        width = columns - 4
         title = 'IP 流量 · ' + clean(capture.interface)
-        status = clean(capture.status) or ('' if capture.rows else '等待 IP 流量')
-        if self.columns < 18 or rows < 5:
-            lines = [clip(title, self.columns), clip(status or '对端 {}'.format(len(capture.rows)), self.columns)]
-            return '\n'.join((lines[:rows - 1] + [''] * max(0, rows - 3) + [self.live_footer('ip')]))
+        peers = capture.rows
+        status = clean(capture.status) or ('' if peers else '等待 IP 流量')
+        if columns < 18 or budget < 4:
+            return [clip(title, columns), clip(status or '对端 {}'.format(len(peers)), columns)], SINGLE_PAGE
 
-        longest = max((len(p.address) for p in capture.rows), default=0)
+        if sort:
+            column, descending = sort
+            if column == 'address':
+                def address_key(peer):
+                    addr = ip_address(peer.address)
+                    return addr.version, int(addr)
+
+                peers = sorted(peers, key=address_key, reverse=descending)
+            else:
+                direction = -1 if descending else 1
+                peers = sorted(peers, key=lambda peer: (direction * getattr(peer, column), peer.address))
+
+        longest = max((len(peer.address) for peer in peers), default=0)
         wide = width >= max(67, longest + 52)
-        headings = ('↓ 下载速率', '↑ 上传速率', '↓ 累计下载', '↑ 累计上传')
-        lines = [self.paint(clip(status, width), 'muted')] if status else []
-        address_lines = max(1, (longest + width - 1) // width)
-        if wide:
-            addr_width = width - 52
-            lines.append(self.paint(pad('对端 IP', addr_width) + ''.join(pad(h, 13, True) for h in headings), 'muted'))
-        capacity = max(1, (rows - 3 - len(lines)) // (1 if wide else address_lines + 2))
-        pages = max(1, (len(capture.rows) + capacity - 1) // capacity)
-        offset = (page % pages) * capacity
-        for peer in capture.rows[offset:offset + capacity]:
+        addr_width = width - 52 if wide else width
+        details_for = getattr(capture, 'peer_details', None)
+        # A fixed second row gives the labels room without repaging when lookups complete.
+        separate_details = details_for is not None and longest + 50 > addr_width
+        # The compact IP header needs four cells and the other headers need five.
+        per_row = len(IP_COLUMNS) if wide else (width + 1) // 5
+        lines = []
+        for group in range(0, len(IP_COLUMNS), per_row):
+            left = 2  # The panel border and its inside padding precede the header.
+            cells = []
+            for column, label, short in IP_COLUMNS[group:group + per_row]:
+                selected = sort is not None and sort[0] == column
+                indicator = ('▾' if sort[1] else '▴') if selected else ' '
+                cell_width = (addr_width if column == 'address' else 13) if wide else display_width(short) + 2
+                text = '{} {}'.format(label if wide else short, indicator)
+                cells.append(self.paint(pad(text, cell_width, right=wide and column != 'address'),
+                                        'ink' if selected else 'muted'))
+                if click_targets is not None:
+                    click_targets.append((len(lines) + 1, left, left + cell_width, column))
+                left += cell_width
+            lines.append(''.join(cells))
+        if status and len(lines) < budget - 2:
+            lines.append(self.paint(clip(status, width), 'muted'))
+        address_lines = max(1, (longest + addr_width - 1) // addr_width)
+        peer_rows = address_lines + (0 if wide else 2) + separate_details
+        capacity = max(1, (budget - 2 - len(lines)) // peer_rows)
+        pages = max(1, (len(peers) + capacity - 1) // capacity)
+        page = min(max(page, 0), pages - 1)
+        offset = page * capacity
+        hostname_for = getattr(capture, 'hostname', None)
+        for peer in peers[offset:offset + capacity]:
+            hostname = hostname_for(peer.address) if hostname_for is not None else ''
+            location, carrier, asn = details_for(peer.address) if details_for is not None else ('', '', '')
+            location = re.sub(r'州(?=·美国$)', '', location)
+            fields = (location, carrier_label(carrier), asn, hostname)
+            inline_fields = () if separate_details else fields
             values = (speed(peer.down_mbps), speed(peer.up_mbps), traffic(peer.download), traffic(peer.upload))
             if wide:
-                line = self.paint(pad(peer.address, addr_width), 'ink')
+                line = pad(self.ip_address_line(peer.address, inline_fields, addr_width), addr_width)
                 for value, role in zip(values, ('down', 'up', 'down', 'up')):
                     line += self.paint(pad(clip(value, 12), 13, True), role)
                 lines.append(line)
             else:
-                lines.extend(self.paint(peer.address[i:i + width], 'ink') for i in range(0, len(peer.address), width))
+                address = [peer.address[i:i + width] for i in range(0, len(peer.address), width)]
+                lines.extend(self.paint(part, 'ink') for part in address[:-1])
+                lines.append(self.ip_address_line(address[-1], inline_fields, width))
+            if separate_details:
+                lines.append(self.ip_address_line('', fields, width))
+            if not wide:
                 for arrow, role, rate, total in (('↓', 'down', values[0], values[2]), ('↑', 'up', values[1], values[3])):
                     lines.append(self.paint(clip('{} {}  ·  累计 {}'.format(arrow, rate, total), width), role))
-        detail = '{}/{}'.format(page % pages + 1, pages) if pages > 1 else ''
-        lines = lines[:rows - 3]
-        lines.extend([''] * (rows - 3 - len(lines)))
-        return '\n'.join(self.panel(title, lines, detail=detail) + [self.live_footer('ip', pages > 1)])
+        lines = lines[:budget - 2]
+        lines.extend([''] * (budget - 2 - len(lines)))
+        panel = self.panel(title, lines, width=columns)
+        if pages > 1:
+            panel[-1] = self.ip_page_controls(columns, budget - 1, page, pages, click_targets)
+        return panel, (page, pages)
 
-    def render(self, report, height, live_sample=None, rows=30, rail=0, connections=None):
-        zone = clean(report.zone or '系统时区')
+    def traffic_share(self, totals, width):
+        if not totals[2]:
+            return ['', '']
+        share = totals[1] / totals[2]
+        filled = round(width * share)
+        return [self.paint('▰' * filled, 'down') + self.paint('▱' * (width - filled), 'up'),
+                self.paint(pad('↓ {:.0%}'.format(share), width // 2), 'down')
+                + self.paint(pad('↑ {:.0%}'.format(1 - share), width - width // 2, right=True), 'up')]
+
+    def wide_traffic_header(self, report, interface, zone, bounds, mark):
+        first, last = bounds
+        context = [('网卡  ', interface), ('时区  ', zone), ('起始  ', first), ('结束  ', last),
+                   ('查询时长  ', elapsed(report.end - report.start))]
+        mark_width = display_width(mark[0])
+        logo_width = mark_width + 3
+        divider = ' │ '
+        available = self.columns - 4 - 2 * display_width(divider)
+        context_width = logo_width + max(display_width(label + value) for label, value in context)
+        remaining = available - context_width
+        if remaining < 48:
+            return []
+        sampling_width = min(32, remaining // 2)
+        flow_width = min(32, remaining - sampling_width)
+        context_width += remaining - flow_width - sampling_width
+        logos = [self.paint('╶━━', 'down') + self.paint('╱╱', 'up'), *mark,
+                 ' ' * (mark_width - 5) + self.paint('╱╱', 'down') + self.paint('━━╴', 'up')]
+        context = [pad(logo, logo_width) + self.paint(label, 'muted') + self.paint(value, 'ink')
+                   for logo, (label, value) in zip(logos, context)]
+
+        def reading(label, value, size, role='ink'):
+            label_width = 8  # Four full-width characters fit the longest labels.
+            room = size - label_width
+            # Allow a date and time in the value field even when a leader fits.
+            leader_width = min(8, room - 14 - 2)
+            space = ' '
+            if leader_width > 0:
+                space += self.paint('┄' * leader_width, 'grid') + ' '
+            value_width = room - display_width(space)
+            value = pad(clip(value, value_width), value_width, right=True)
+            return self.paint(pad(label, label_width), 'muted') + space + self.paint(value, role)
+
+        summary = report.summary
+        up, down, total = [traffic(value) if summary.count else '—' for value in summary.totals]
+        flow = [reading('累计流量', total, flow_width, 'total'),
+                reading('↓ 下载', down, flow_width, 'down'), reading('↑ 上传', up, flow_width, 'up'),
+                *self.traffic_share(summary.totals, flow_width)]
+        sample_format = '%H:%M:%S' if first[:10] == last[:10] else '%m-%d %H:%M:%S'
+        samples = [reading('采样', '{:,} 次'.format(summary.count), sampling_width),
+                   reading('有效时长', elapsed(summary.duration) if summary.count else '—', sampling_width),
+                   reading('平均间隔', '{:.2f}s'.format(summary.duration / summary.count) if summary.count else '—',
+                           sampling_width)]
+        for label, timestamp in (('首条采样', summary.first), ('末条采样', summary.last)):
+            value = local_datetime(timestamp, report.zone).strftime(sample_format) if timestamp is not None else '—'
+            samples.append(reading(label, value, sampling_width))
+
+        divider = self.paint(divider, 'frame')
+        return [divider.join((pad(left, context_width), pad(middle, flow_width), right))
+                for left, middle, right in zip(context, flow, samples)]
+
+    def render(self, report, height, live_sample=None, rows=30, rail=0, connections=None, click_targets=None,
+               *, ip_capture=None, ip_page=0, ip_sort=None):
         interface = clean(report.interface)
         summary = report.summary
         live = live_sample is not None
@@ -556,8 +877,7 @@ class Dashboard:
                 elif connections and len(lines) + 2 <= rows:
                     snap = connections[0]
                     lines.append(clip('本机 TCP  ' + (snap.status or '已建立 {}'.format(snap.established)), self.columns))
-                lines += [''] * max(0, rows - len(lines) - 1)
-                return '\n'.join((lines + [self.live_footer()])[-rows:])
+                return self.live_screen(lines, rows, click_targets=click_targets)
             if summary.count:
                 output = [label + '  ' + traffic(summary.totals[i]) for label, i, _ in DIRECTIONS]
             else:
@@ -568,13 +888,23 @@ class Dashboard:
         width = self.columns - 4
         stamp = lambda value: local_datetime(value, report.zone).strftime('%Y-%m-%d %H:%M:%S %z')
         first, last = stamp(report.start), stamp(report.end)
+        mark = [self.paint(n, 'down') + ' ' + self.paint(m, 'up') for n, m in BLOCK_MARK]
+        divider = ' │ '
+        mark_width = display_width(mark[0]) + display_width(divider)
         range_text = '查询  {}  →  {}'.format(first, last)
-        if display_width(range_text) > width and first[:10] == last[:10] and first[-5:] == last[-5:]:
-            range_text = '查询  {} → {}'.format(first[:19], last[11:])
+        range_width = width - mark_width if self.columns >= 78 else width
+        if display_width(range_text) > range_width and first[-5:] == last[-5:]:
+            right_stamp = last[11:] if first[:10] == last[:10] else last
+            range_text = '查询  {} → {}'.format(first[:19], right_stamp)
         iface = clip(interface, width - display_width('网卡  '))
-        meta = '   ·   时区  ' + zone
-        lines = [self.paint('网卡  ', 'muted') + self.tint(iface, self.title_ink)
-                 + self.paint(clip(meta, max(0, width - 6 - display_width(iface))), 'muted')]
+        zone_name = clean(timezone_label(report.zone))
+        zone = '时区  ' + zone_name
+        meta = '   ·   ' + zone
+        lines = [self.paint('网卡  ', 'muted') + self.tint(iface, self.title_ink)]
+        if display_width(lines[0] + meta) <= width:
+            lines[0] += self.paint(meta, 'muted')
+        else:
+            lines.append(self.paint(clip(zone, width), 'muted'))
         if display_width(range_text) <= width:
             lines.append(self.paint(range_text, 'muted'))
         else:
@@ -590,20 +920,21 @@ class Dashboard:
                 lines.extend(self.paint(line, 'muted') for line in (
                     '采样  {:,} 次  ·  间隔  {}'.format(summary.count, interval),
                     '有效  ' + elapsed(summary.duration)))
-        # Fit the mark alongside the metadata; it never costs a graph row.
-        mark = (('█▄  █', '█▄ ▄█'), ('█ ▀▄█', '█ ▀ █'), ('█   █', '█   █'))
         totals = summary.totals
-        if len(lines) == len(mark) and all(display_width(line) + 16 <= width for line in lines):
-            lines = [self.paint(n, 'down') + ' ' + self.paint(m, 'up') + self.paint('  │  ', 'frame') + line
-                     for (n, m), line in zip(mark, lines)]
-            segments = 24
-            if totals[2] and all(display_width(line) + segments + 2 <= width for line in lines):
-                share = totals[1] / totals[2]
-                filled = round(segments * share)
-                mix = (self.paint('累计流量占比', 'ink'),
-                       self.paint('▰' * filled, 'down') + self.paint('▱' * (segments - filled), 'up'),
-                       self.paint(pad('↓ {:.0%}'.format(share), segments // 2), 'down')
-                       + self.paint(pad('↑ {:.0%}'.format(1 - share), segments // 2, right=True), 'up'))
+        wide_header = []
+        if self.columns >= 112 and rows >= 42:
+            wide_header = self.wide_traffic_header(report, interface, zone_name, (first, last), mark)
+        if wide_header:
+            lines, totals = wide_header, None
+        elif len(lines) == len(mark) and all(display_width(line) + mark_width <= width for line in lines):
+            divider = self.paint(divider, 'frame')
+            lines = [logo + divider + line for logo, line in zip(mark, lines)]
+            segments = min(36, width - max(map(display_width, lines)) - 2)
+            if totals[2] and segments >= 24:
+                label = '累计流量  '
+                heading = self.paint(label, 'ink') + self.paint(clip(traffic(totals[2]), segments - display_width(label)),
+                                                                'total')
+                mix = [heading, *self.traffic_share(totals, segments)]
                 lines = [pad(line, width - segments) + panel for line, panel in zip(lines, mix)]
                 totals = None
         rates_in_cards = live and self.columns >= 48
@@ -611,14 +942,18 @@ class Dashboard:
             status = '● ' + live_sample.status
         if live and not rates_in_cards:
             lines.extend(self.live_readings(live_sample, width))
-        output = self.panel(title, lines, role='down', detail=status, detail_role='total' if live else 'up')
+        output = self.panel(title, lines, role='down', detail=status, detail_role='total' if live else 'up',
+                            accented=True)
         if live:
             space = rows - len(output) - 1
             rates = (live_sample.rates or (None, None, None)) if rates_in_cards else None
-            output.extend(self.live_body(report, rates,
-                                         height, rail, space, connections))
-            output += [''] * max(0, rows - len(output) - 1)
-            return '\n'.join(output + [self.live_footer()])
+            if (ip_capture is None or not ip_capture.ready or ip_capture.status
+                    or not ip_preview_fits(self.columns, rows, rail)):
+                ip_capture = None
+            body, paging = self.live_body(report, rates, height, rail, space, connections, ip_capture=ip_capture,
+                                          ip_page=ip_page, ip_sort=ip_sort, click_targets=click_targets,
+                                          row_offset=len(output))
+            return self.live_screen(output + body, rows, paging=paging, click_targets=click_targets)
         if summary.count:
             metrics = self.metrics(summary, big_readout=True, rail=rail)
             if rail and report.chart is not None:
@@ -660,8 +995,6 @@ def peak_label(values, stride, rows, above, start, end, step, zone):
     x = index // stride
     order = range(len(rows)) if above else reversed(range(len(rows)))
     edge = next(y for y in order if rows[y][x])
-    outer = edge - 1 if above else edge + 1
-    arrow = '▾' if above else '▴'
     first, last = local_datetime(start, zone), local_datetime(end, zone)
     fmt = '%H:%M:%S' if first.date() == last.date() else '%m-%d %H:%M:%S'
     if step < 1:
@@ -671,11 +1004,18 @@ def peak_label(values, stride, rows, above, start, end, step, zone):
     interval = '–'.join(local_datetime(min(end, start + i * step), zone).strftime(fmt)
                         for i in (index, index + 1))
     rate = speed(peak)
-    for label in (rate + ' · ' + interval, rate):
-        positions = ((outer, x, arrow + ' ' + label), (outer, x - len(label) - 1, label + ' ' + arrow),
-                     (edge, x + 1, '◂ ' + label), (edge, x - len(label) - 2, label + ' ▸'))
+    return place_peak_note(rows, x, edge, above, (rate + ' · ' + interval, rate))
+
+
+def place_peak_note(rows, column, edge, above, labels):
+    outer = edge - 1 if above else edge + 1
+    arrow = '▾' if above else '▴'
+    for label in labels:
+        width = display_width(label)
+        positions = ((outer, column, arrow + ' ' + label), (outer, column - width - 1, label + ' ' + arrow),
+                     (edge, column + 1, '◂ ' + label), (edge, column - width - 2, label + ' ▸'))
         for y, left, text in positions:
-            right = left + len(text)
+            right = left + display_width(text)
             if 0 <= y < len(rows) and 0 <= left and right <= len(rows[y]) and not any(rows[y][left:right]):
                 return y, left, text
     return None
@@ -684,7 +1024,6 @@ def peak_label(values, stride, rows, above, start, end, step, zone):
 def area_cells(values, height, limit, above, smooth=True):
     # Live charts pack two independent buckets into each Braille cell.
     # Historical charts use both halves of the cell for a smooth transition.
-    dots = ((1, 2, 4, 64), (8, 16, 32, 128))
     columns = len(values) if smooth else (len(values) + 1) // 2
     rows = [[''] * columns for _ in range(height)]
     for column in range(columns):
@@ -704,10 +1043,59 @@ def area_cells(values, height, limit, above, smooth=True):
             cell = 0
             for x, level in enumerate(levels):
                 for y in range(min(4, max(0, level - offset))):
-                    cell |= dots[x][3 - y if above else y]
+                    cell |= BRAILLE_DOTS[x][3 - y if above else y]
             if cell:
                 rows[row][column] = chr(0x2800 + cell)
     return rows
+
+
+def line_cells(values, height, limit):
+    """Draw a line at Braille dot resolution, with one cell per sample."""
+    rows = [[0] * len(values) for _ in range(height)]
+    bottom = height * 4 - 1
+    previous = None
+    for column, value in enumerate(values):
+        if value is None:
+            previous = None
+            continue
+        x, y = column * 2 + 1, bottom - round(value / limit * bottom)
+        previous_x, previous_y = previous if previous is not None else (x, y)
+        dx, dy = x - previous_x, y - previous_y
+        steps = max(1, dx, abs(dy))
+        for step in range(steps + 1):
+            dot_x = previous_x + round(dx * step / steps)
+            dot_y = previous_y + round(dy * step / steps)
+            rows[dot_y // 4][dot_x // 2] |= BRAILLE_DOTS[dot_x % 2][dot_y % 4]
+        previous = x, y
+    return [[chr(0x2800 + cell) if cell else '' for cell in row] for row in rows]
+
+
+def connection_columns(history, width):
+    if len(history) <= width:
+        return [None] * (width - len(history)) + list(history)
+
+    columns = [None] * width
+    # Keep the latest sample on the right edge. Each earlier time bucket keeps its peak.
+    columns[-1] = history[-1]
+    if width == 1:
+        return columns
+    start, end = history[0][0], history[-1][0]
+    step = (end - start) / (width - 1)
+    first, last = 0, len(history) - 1
+    for column in range(width - 1):
+        if column == width - 2:
+            stop = last
+        elif step:
+            boundary = (start + (column + 1) * step,)
+            stop = bisect_left(history, boundary, first, last)
+        else:
+            stop = math.ceil((column + 1) * last / (width - 1))
+        sample = max(history[first:stop], key=lambda point: point[1] if point[1] is not None else -1,
+                     default=None)
+        if sample is not None and sample[1] is not None:
+            columns[column] = sample
+        first = stop
+    return columns
 
 
 def time_labels(start, end, columns, zone):

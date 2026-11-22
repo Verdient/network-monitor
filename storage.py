@@ -176,6 +176,18 @@ def summarize(connection, tables, start, end):
     return summary
 
 
+def traffic_totals(connection, interface, start, end):
+    count = up = down = 0
+    for table in tables_for(connection, interface, start, end):
+        samples, upload, download = connection.execute('''SELECT count(*), sum(upload_bytes), sum(download_bytes)
+            FROM "{}" WHERE timestamp >= ? AND timestamp < ?'''.format(table), (start, end)).fetchone()
+        if samples:
+            count += samples
+            up += upload
+            down += download
+    return (up, down, up + down) if count else None
+
+
 def chart_series(connection, tables, start, end, summary, columns, live_samples=(), chart_end=None):
     """Bucket persisted and session samples on the same time axis."""
     if chart_end is None:

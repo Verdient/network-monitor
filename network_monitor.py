@@ -24,6 +24,8 @@ EXAMPLES = {
     'stats': '''示例：
   network-monitor stats                           统计今天的记录
   network-monitor stats -i eth0 --timezone UTC      按 UTC 统计 eth0
+  network-monitor stats -d 2026-11-18              统计指定日期
+  network-monitor stats --traffic                  汇总最近 15 天的流量
   network-monitor stats --start 2026-11-01 --end 2026-11-20
   network-monitor stats --no-chart                 只显示统计表
   network-monitor stats --live --last 15m          从启动前 15 分钟开始实时查看

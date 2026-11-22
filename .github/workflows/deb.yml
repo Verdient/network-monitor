@@ -6,6 +6,7 @@ on:
     paths:
       - '**.py'
       - network-monitor.spec
+      - geo_data/**
       - requirements-build.txt
       - packaging/debian/**
       - scripts/test_deb_container.sh
@@ -51,9 +52,11 @@ jobs:
       - name: 下载使用单文件打包的旧版安装包
         env:
           GH_TOKEN: ${{ github.token }}
-          OLD_PACKAGE: network-monitor_0.2.1-1_${{ matrix.architecture }}.deb
+          OLD_TAG: v0.2.1
+          PACKAGE_ARCH: ${{ matrix.architecture }}
         run: |
-          gh release download v0.2.1 --repo Verdient/network-monitor --dir "$RUNNER_TEMP/previous-deb" \
+          OLD_PACKAGE="network-monitor_${OLD_TAG#v}-1_${PACKAGE_ARCH}.deb"
+          gh release download "$OLD_TAG" --repo Verdient/network-monitor --dir "$RUNNER_TEMP/previous-deb" \
             --pattern "$OLD_PACKAGE" --pattern SHA256SUMS
           cd "$RUNNER_TEMP/previous-deb"
           awk -v package="$OLD_PACKAGE" '$2 == package' SHA256SUMS | sha256sum --check

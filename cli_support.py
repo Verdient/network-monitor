@@ -10,8 +10,39 @@ import configuration
 
 class HelpFormatter(argparse.RawDescriptionHelpFormatter):
     def __init__(self, prog):
-        super().__init__(prog, indent_increment=2, max_help_position=30,
+        super().__init__(prog, indent_increment=2, max_help_position=44,
                          width=min(100, max(60, shutil.get_terminal_size((100, 24)).columns)))
+
+    @staticmethod
+    def option_name(action):
+        options = action.option_strings
+        return next((option[2:] for option in options if option.startswith('--')),
+                    options[0].lstrip('-') if options else '')
+
+    def add_arguments(self, actions):
+        super().add_arguments(sorted(actions, key=self.option_name))
+
+    def _format_action_invocation(self, action):
+        if len(action.option_strings) > 1 and action.nargs != 0:
+            default = self._get_default_metavar_for_optional(action)
+            arguments = self._format_args(action, default)
+            return ', '.join(action.option_strings) + ' ' + arguments
+        return super()._format_action_invocation(action)
+
+    def add_usage(self, usage, actions, groups, prefix=None):
+        if usage is None:
+            exclusive = {action: group._group_actions for group in groups for action in group._group_actions}
+            blocks = []
+            for action in actions:
+                group = exclusive.get(action)
+                if group is None:
+                    blocks.append([action])
+                elif action is group[0]:
+                    blocks.append(group)
+            # argparse needs alternatives to stay adjacent in the usage summary.
+            blocks.sort(key=lambda block: self.option_name(block[0]))
+            actions = [action for block in blocks for action in block]
+        super().add_usage(usage, actions, groups, prefix)
 
     def _get_help_string(self, action):
         text = action.help or ''

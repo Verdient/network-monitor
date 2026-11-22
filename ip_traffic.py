@@ -3,12 +3,16 @@ from dataclasses import dataclass
 from ipaddress import ip_address
 import json
 import os
+from queue import Full, Queue
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import threading
 import time
+
+from ip_location import IPLocations
 
 
 def system_environment():
@@ -107,6 +111,12 @@ class IPTraffic:
         self.previous = None
         self.rows = []
         self.status = ''
+        self.ready = False
+        self.hostnames = {}
+        self.hostname_requests = Queue(maxsize=32)
+        self.hostname_worker = None
+        self.closed = threading.Event()
+        self.locations = IPLocations(changed)
 
     def start(self):
         binary = shutil.which('tcpdump')
@@ -128,6 +138,19 @@ class IPTraffic:
 
     def _read(self):
         proc = self.process
+        errors = []
+
+        def read_errors():
+            for line in proc.stderr:
+                message = line.decode(errors='replace').strip()
+                if message.startswith('tcpdump: listening on '):
+                    self.ready = True
+                    self.changed.set()
+                elif message:
+                    errors.append(message)
+
+        diagnostics = threading.Thread(target=read_errors, daemon=True)
+        diagnostics.start()
         try:
             local, broadcasts = interface_addresses(self.interface)
             refresh_at = time.monotonic() + 10
@@ -152,13 +175,16 @@ class IPTraffic:
         finally:
             if proc.poll() is None:
                 proc.terminate()
-            _, errors = proc.communicate()
+            proc.stdout.close()
+            proc.wait()
+            diagnostics.join()
+            proc.stderr.close()
             if proc.returncode and errors:
-                messages = errors.decode(errors='replace').strip().splitlines()
-                if any('permi' in message.lower() for message in messages):
+                if any('permi' in message.lower() for message in errors):
                     self.status = '当前用户没有此网卡的抓包权限'
-                elif messages and not messages[0].startswith('tcpdump: listening on'):
-                    self.status = messages[0]
+                else:
+                    self.status = errors[0]
+            self.ready = False
             self.changed.set()
 
     def sample(self):
@@ -181,7 +207,44 @@ class IPTraffic:
         self.rows = sorted(rows, key=lambda row: (-(row.down_mbps + row.up_mbps),
                                                  -(row.download + row.upload), row.address))
 
+    def hostname(self, address):
+        with self.lock:
+            if address not in self.hostnames and not self.closed.is_set():
+                try:
+                    self.hostname_requests.put_nowait(address)
+                except Full:
+                    return ''
+                self.hostnames[address] = ''
+                if self.hostname_worker is None:
+                    self.hostname_worker = threading.Thread(target=self._resolve_hostnames, daemon=True)
+                    self.hostname_worker.start()
+            return self.hostnames.get(address, '')
+
+    def _resolve_hostnames(self):
+        while not self.closed.is_set():
+            address = self.hostname_requests.get()
+            if address is None or self.closed.is_set():
+                return
+            try:
+                name = socket.gethostbyaddr(address)[0].rstrip('.')
+            except OSError:
+                continue
+            if name and name != address:
+                with self.lock:
+                    self.hostnames[address] = name
+                self.changed.set()
+
+    def peer_details(self, address):
+        return self.locations.lookup(address)
+
     def close(self):
+        self.locations.close()
+        self.closed.set()
+        if self.hostname_worker is not None:
+            try:
+                self.hostname_requests.put_nowait(None)
+            except Full:
+                pass
         proc = self.process
         if proc is None:
             return

@@ -148,7 +148,7 @@ class StorageTests(unittest.TestCase):
             default.assert_called_once_with()
         output = io.StringIO()
         with patch('monitor.default_interface', return_value='eth0') as default, contextlib.redirect_stdout(output):
-            result = network_monitor.main(['stats', '-c', str(config), '-d', str(self.path),
+            result = network_monitor.main(['stats', '-c', str(config), '--database', str(self.path),
                                            '--start', str(BASE), '--end', str(BASE + 10), '--no-chart'])
             self.assertEqual(result, 0)
             default.assert_called_once_with()

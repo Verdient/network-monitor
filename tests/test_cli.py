@@ -2,6 +2,7 @@ import datetime as dt
 import os
 from pathlib import Path
 import platform
+import re
 import socket
 import sqlite3
 import subprocess
@@ -59,6 +60,9 @@ class CommandTests(unittest.TestCase):
                 self.assertIn('usage: network-monitor', result.stdout)
                 self.assertIn('命令行 > 配置文件 > 内置默认值', result.stdout)
                 self.assertIn('示例' if command else '快速开始', result.stdout)
+                for section in result.stdout.split('\n\n'):
+                    options = re.findall(r'^  (?:-[a-z][^,]*, )?(--[a-z-]+)', section, re.MULTILINE)
+                    self.assertEqual(options, sorted(options))
                 if not command:
                     self.assertIn('--interval', result.stdout)
                     self.assertIn('--last', result.stdout)
@@ -66,6 +70,21 @@ class CommandTests(unittest.TestCase):
                     self.assertNotIn('--plain', result.stdout)
                 elif command == ('stats',):
                     self.assertIn('--live', result.stdout)
+
+    def test_help_lists_aliases_with_one_metavar_in_a_narrow_terminal(self):
+        self.env['COLUMNS'] = '60'
+        for command in ((), ('stats',), ('monitor',), ('install',)):
+            with self.subTest(command=command):
+                result = self.invoke(*command, '-h')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('-c, --config PATH', result.stdout)
+                if command in ((), ('stats',)):
+                    self.assertRegex(result.stdout, r'-d, --day YYYY-MM-DD +查询所选时区')
+                    self.assertIn('-i, --interface NAME', result.stdout)
+                    self.assertIn('--timezone, --tz ZONE', result.stdout)
+                else:
+                    self.assertIn('-d, --database DB', result.stdout)
+                    self.assertIn('-i, --interface NAME [NAME ...]', result.stdout)
 
     def test_help_survives_bad_configuration(self):
         self.config('invalid', 'network-monitor.ini')
@@ -113,8 +132,36 @@ class CommandTests(unittest.TestCase):
         missing = self.invoke('stats', '-c', 'custom.ini', *QUERY)
         self.assertEqual(missing.returncode, 1)
         self.assertIn('missing-monitor.db', missing.stderr)
-        result = self.invoke('stats', '-c', 'custom.ini', '-d', 'samples.db', *QUERY, '--no-chart')
+        result = self.invoke('stats', '-c', 'custom.ini', '--database', 'samples.db', *QUERY, '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_day_matches_explicit_boundaries_in_the_selected_zone(self):
+        self.samples()
+        options = ('stats', '--database', 'samples.db', '-i', 'eth0', '--tz', 'Asia/Shanghai')
+        explicit = self.invoke(*options, '--start', '2026-11-19', '--end', '2026-11-20')
+        for option in ('-d', '--day'):
+            with self.subTest(option=option):
+                day = self.invoke(*options, option, '2026-11-19')
+                self.assertEqual(day.returncode, 0, day.stderr)
+                self.assertEqual(day.stdout, explicit.stdout)
+        for extra in (('--day', '2026-02-30'), ('--day', '2026-11-19', '--last', '1d')):
+            self.assertEqual(self.invoke(*options, *extra).returncode, 2)
+
+    def test_traffic_uses_requested_periods_counts_and_half_open_bounds(self):
+        self.samples()
+        options = ('stats', '--database', 'samples.db', '-i', 'eth0', '--tz', 'UTC', '--traffic')
+        for unit, count in (((), 15), (('hour',), 24), (('minute',), 60),
+                            (('second',), 60), (('month',), 12)):
+            with self.subTest(unit=unit):
+                result = self.invoke(*options, *unit, '--end', str(STAMP + 5))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(result.stdout.splitlines()[2:]), count)
+        result = self.invoke(*options, 'second', '--start', str(STAMP + 1), '--end', str(STAMP + 4), '--count', '2')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([line.split()[-3:] for line in result.stdout.splitlines()[2:]], [['—'] * 3] * 2)
+        result = self.invoke(*options, 'hour', '--day', '2026-11-19')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r'2026-11-19 12:00 \+0000\s+5\.00 MB\s+7\.00 MB\s+12\.00 MB')
 
     def test_invalid_configuration_and_missing_explicit_path(self):
         self.assertEqual(self.invoke('stats', '-c', 'missing.ini').returncode, 2)
@@ -144,27 +191,27 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn('Traceback', result.stderr)
 
     def test_missing_database_does_not_create_it(self):
-        result = self.invoke('stats', '-d', 'missing.db', '-i', 'eth0')
+        result = self.invoke('stats', '--database', 'missing.db', '-i', 'eth0')
         self.assertEqual(result.returncode, 1)
         self.assertIn('missing.db', result.stderr)
         self.assertIn('monitor 采集数据', result.stderr)
-        self.assertIn('stats -d', result.stderr)
+        self.assertIn('stats --database', result.stderr)
         self.assertFalse((self.cwd / 'missing.db').exists())
 
     def test_stats_weighted_averages_and_chart(self):
         self.samples()
-        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--no-chart')
+        result = self.invoke('stats', '--database', 'samples.db', *QUERY, '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('14.00', result.stdout)
         self.assertIn('10.00', result.stdout)
         self.assertNotIn('网速趋势', result.stdout)
-        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--width', '20', '--height', '3')
+        result = self.invoke('stats', '--database', 'samples.db', *QUERY, '--width', '20', '--height', '3')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('网速趋势', result.stdout)
 
     def test_dashboard_displays_metrics_without_color_when_redirected(self):
         self.samples()
-        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--dashboard')
+        result = self.invoke('stats', '--database', 'samples.db', *QUERY, '--dashboard')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('NETWORK MONITOR', result.stdout)
         self.assertIn('采样  2 次', result.stdout)
@@ -172,7 +219,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn('↑ 上传', result.stdout)
         self.assertIn('网速趋势', result.stdout)
         self.assertNotIn('\033', result.stdout)
-        result = self.invoke('stats', '-d', 'samples.db', *QUERY, '--dashboard', '--no-chart')
+        result = self.invoke('stats', '--database', 'samples.db', *QUERY, '--dashboard', '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('网速趋势', result.stdout)
 
@@ -184,7 +231,7 @@ class CommandTests(unittest.TestCase):
             writer.write(now - 5, 1, {'eth0': (1000, 2000)})
         finally:
             writer.close()
-        result = self.invoke('stats', '-d', 'recent.db', '-i', 'eth0', '--last', '15m', '--plain', '--no-chart')
+        result = self.invoke('stats', '--database', 'recent.db', '-i', 'eth0', '--last', '15m', '--plain', '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('采样：1 次', result.stdout)
         self.assertIn('2.00 KB', result.stdout)
@@ -210,7 +257,16 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('采样：1 次', result.stdout)
         self.assertIn('+0900', result.stdout)
-        self.assertIn('系统时区', result.stdout)
+        self.assertIn('时区：Asia/Tokyo（系统）', result.stdout)
+
+        self.env['COLUMNS'] = '40'
+        dashboard = self.invoke('stats', '-c', config, '-i', 'eth0', '--dashboard', '--no-chart')
+        self.assertEqual(dashboard.returncode, 0, dashboard.stderr)
+        self.assertIn('时区  Asia/Tokyo（系统）', dashboard.stdout)
+
+        traffic = self.invoke('stats', '-c', config, '-i', 'eth0', '--traffic', '--count', '1', '--tz', 'Asia/Tokyo')
+        self.assertEqual(traffic.returncode, 0, traffic.stderr)
+        self.assertTrue(traffic.stdout.splitlines()[0].endswith('时区 Asia/Tokyo'))
 
     def test_local_day_spans_two_utc_partitions_and_interface_is_filtered(self):
         zone = ZoneInfo('Asia/Shanghai')
@@ -222,13 +278,13 @@ class CommandTests(unittest.TestCase):
                 writer.write(stamp, 1, {'eth0': (100, 200), 'wlan0': (500, 600)})
         finally:
             writer.close()
-        result = self.invoke('stats', '-d', 'samples.db', '-i', 'wlan0', '--timezone',
+        result = self.invoke('stats', '--database', 'samples.db', '-i', 'wlan0', '--timezone',
                              'Asia/Shanghai', '--start', '2026-11-19', '--end', '2026-11-20', '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('采样：2 次', result.stdout)
         self.assertIn('1.00 KB', result.stdout)
         self.assertIn('1.20 KB', result.stdout)
-        result = self.invoke('stats', '-d', 'samples.db', '-i', 'absent', *QUERY[:-2], '--no-chart')
+        result = self.invoke('stats', '--database', 'samples.db', '-i', 'absent', *QUERY[:-2], '--no-chart')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('暂无采样数据', result.stdout)
 
@@ -236,7 +292,7 @@ class CommandTests(unittest.TestCase):
         self.samples()
         for start, end in ((str(STAMP + 1), str(STAMP + 4)),
                            ('2026-11-19T20:00:01+08:00', '2026-11-19T20:00:04+08:00')):
-            result = self.invoke('stats', '-d', 'samples.db', '-i', 'eth0', '--start', start,
+            result = self.invoke('stats', '--database', 'samples.db', '-i', 'eth0', '--start', start,
                                  '--end', end, '--timezone', 'UTC', '--no-chart')
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('采样：1 次', result.stdout)
@@ -261,7 +317,7 @@ class CommandTests(unittest.TestCase):
                 for table in tables:
                     row = connection.execute('SELECT typeof(timestamp), typeof(duration_s) FROM "{}"'.format(table)).fetchone()
                     self.assertEqual(row, ('integer', 'real'))
-        stats = self.invoke('stats', '-d', 'traffic.db', '-i', 'lo', '--no-chart')
+        stats = self.invoke('stats', '--database', 'traffic.db', '-i', 'lo', '--no-chart')
         self.assertEqual(stats.returncode, 0, stats.stderr)
         self.assertIn('采样：2 次', stats.stdout)
 

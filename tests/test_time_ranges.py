@@ -54,6 +54,17 @@ class TimeRangeTests(unittest.TestCase):
         second = time_ranges.parse_time('2026-11-01T01:30:00-05:00', None)
         self.assertEqual(second - first, 3600)
 
+    def test_traffic_periods_keep_both_repeated_hours_and_calendar_months(self):
+        zone = ZoneInfo('America/New_York')
+        start, end = time_ranges.day_range('2026-11-01', zone)
+        hours = time_ranges.traffic_periods('hour', 25, start, end, zone)
+        self.assertEqual(len(hours), 25)
+        self.assertEqual([time_ranges.local_datetime(left, zone).strftime('%H:%M %z') for _, left, _ in hours[:4]],
+                         ['00:00 -0400', '01:00 -0400', '01:00 -0500', '02:00 -0500'])
+        months = time_ranges.traffic_periods('month', 3, None, start, zone)
+        self.assertEqual([time_ranges.local_datetime(left, zone).strftime('%Y-%m-%d') for _, left, _ in months],
+                         ['2026-08-01', '2026-09-01', '2026-10-01'])
+
     def test_unix_naive_and_aware_inputs_are_equivalent(self):
         zone = ZoneInfo('Asia/Shanghai')
         stamp = dt.datetime(2026, 11, 19, tzinfo=zone).timestamp()

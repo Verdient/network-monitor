@@ -51,4 +51,16 @@ tcp4  0      0       192.0.2.1.7777         192.0.2.7.9000         TIME_WAIT
                 self.assertTrue(reader.changed.wait(2))
                 reader.worker.join(2)
                 reader.changed.clear()
-                self.assertEqual(reader.frame[1], expected)
+                history = reader.frame[1]
+                self.assertEqual(tuple(count for _, count in history), expected)
+                self.assertEqual(list(history), sorted(history, key=lambda sample: sample[0]))
+
+    def test_reader_retains_early_samples_for_session_compression(self):
+        reader = ConnectionReader()
+        with patch('tcp_connections.read_connections', return_value=Connections(7)):
+            reader._read()
+            first = reader.frame[1][0]
+            for _ in range(150):
+                reader._read()
+        self.assertEqual(len(reader.frame[1]), 151)
+        self.assertEqual(reader.frame[1][0], first)
