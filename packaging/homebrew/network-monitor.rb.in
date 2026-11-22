@@ -36,12 +36,9 @@ class NetworkMonitor < Formula
       # timezone = Asia/Shanghai
     EOS
     (etc/"network-monitor").install "config.ini"
-    doc.install "README.md", "network-monitor.example.ini", "THIRD_PARTY_NOTICES.txt"
-  end
-
-  def post_install
     (var/"lib/network-monitor").mkpath
     (var/"log/network-monitor").mkpath
+    doc.install "README.md", "network-monitor.example.ini", "THIRD_PARTY_NOTICES.txt"
   end
 
   service do
