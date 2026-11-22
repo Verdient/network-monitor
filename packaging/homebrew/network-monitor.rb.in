@@ -21,7 +21,9 @@ class NetworkMonitor < Formula
     libexec.install "network-monitor", "network-monitor-runtime"
     (libexec/"homebrew-prefix").write "#{HOMEBREW_PREFIX}\n"
     bin.write_exec_script libexec/"network-monitor"
-    generate_completions_from_executable(bin/"network-monitor", "completion", shells: [:bash, :zsh, :fish])
+    bash_completion.install "completions/network-monitor"
+    zsh_completion.install "completions/_network-monitor"
+    fish_completion.install "completions/network-monitor.fish"
 
     (buildpath/"config.ini").write <<~EOS
       # Long-running service settings. Edit and run: brew services restart network-monitor
@@ -64,6 +66,11 @@ class NetworkMonitor < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/network-monitor -v")
+    { "bash" => bash_completion/"network-monitor",
+      "zsh" => zsh_completion/"_network-monitor",
+      "fish" => fish_completion/"network-monitor.fish" }.each do |shell, script|
+      assert_equal shell_output("#{bin}/network-monitor completion #{shell}"), script.read
+    end
     assert_match "SQLite", shell_output("#{bin}/network-monitor monitor --help")
     system bin/"network-monitor", "monitor", "--interface", "lo0",
            "--database", testpath/"samples.db", "--count", "1"

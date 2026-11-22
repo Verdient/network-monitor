@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import io
 from importlib.metadata import distribution
 from pathlib import Path
 import platform
@@ -16,6 +17,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from version import __version__
 from install_paths import RUNTIME_DIRECTORY
+from shell_completion import SCRIPTS
+
+
+COMPLETION_FILES = {
+    'bash': 'completions/network-monitor',
+    'zsh': 'completions/_network-monitor',
+    'fish': 'completions/network-monitor.fish',
+}
 
 
 def check_version(version):
@@ -73,6 +82,11 @@ def archive(binary, output, version):
         for name in ('README.md', 'LICENSE', 'network-monitor.example.ini'):
             package.add(ROOT / name, arcname=name)
         package.add(notices, arcname=notices.name)
+        for shell, name in COMPLETION_FILES.items():
+            content = SCRIPTS[shell].encode('utf-8')
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            package.addfile(member, io.BytesIO(content))
     print(destination)
     return destination
 
@@ -85,7 +99,7 @@ def generate_formula(assets, output, version):
         path = assets / 'network-monitor-{}-macos-{}.tar.gz'.format(version, architecture)
         with tarfile.open(path, 'r:gz') as package:
             members = {member.name: member for member in package.getmembers()}
-            for name in ('network-monitor', 'LICENSE', 'THIRD_PARTY_NOTICES.txt'):
+            for name in ('network-monitor', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', *COMPLETION_FILES.values()):
                 if name not in members or not members[name].isfile():
                     raise ValueError('发布包缺少必要文件: ' + name)
             if RUNTIME_DIRECTORY not in members or not members[RUNTIME_DIRECTORY].isdir():
