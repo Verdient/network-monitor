@@ -150,18 +150,36 @@ class CommandTests(unittest.TestCase):
     def test_traffic_uses_requested_periods_counts_and_half_open_bounds(self):
         self.samples()
         options = ('stats', '--database', 'samples.db', '-i', 'eth0', '--tz', 'UTC', '--traffic')
-        for unit, count in (((), 15), (('hour',), 24), (('minute',), 60),
-                            (('second',), 60), (('month',), 12)):
+        for unit, count, end in (
+            ((), 15, '2026-12-03T12:00:00'),
+            (('hour',), 24, str(STAMP + 23 * 3600 + 5)),
+            (('minute',), 60, str(STAMP + 59 * 60 + 5)),
+            (('second',), 60, str(STAMP + 61)),
+            (('month',), 12, '2027-10-15'),
+        ):
             with self.subTest(unit=unit):
-                result = self.invoke(*options, *unit, '--end', str(STAMP + 5))
+                result = self.invoke(*options, *unit, '--end', end)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(len(result.stdout.splitlines()[2:]), count)
         result = self.invoke(*options, 'second', '--start', str(STAMP + 1), '--end', str(STAMP + 4), '--count', '2')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([line.split()[-3:] for line in result.stdout.splitlines()[2:]], [['—'] * 3] * 2)
+        self.assertEqual(result.stdout.splitlines()[1:], ['暂无采样数据'])
         result = self.invoke(*options, 'hour', '--day', '2026-11-19')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r'2026-11-19 12:00 \+0000\s+5\.00 MB\s+7\.00 MB\s+12\.00 MB')
+
+        writer = storage.Writer(self.cwd / 'samples.db')
+        try:
+            writer.write(STAMP, 1, {'eth0': (0, 0)})
+        finally:
+            writer.close()
+        result = self.invoke(*options, 'second', '--start', str(STAMP - 2), '--end', str(STAMP + 7), '--count', '9')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [line.split() for line in result.stdout.splitlines()[2:]]
+        self.assertEqual([row[1] for row in rows], ['12:00:{:02d}'.format(second) for second in range(7)])
+        self.assertEqual(rows[0][3:], ['0.00', 'B'] * 3)
+        self.assertEqual([row[1] for row in rows if row[-3:] == ['—'] * 3],
+                         ['12:00:02', '12:00:03', '12:00:05', '12:00:06'])
 
     def test_invalid_configuration_and_missing_explicit_path(self):
         self.assertEqual(self.invoke('stats', '-c', 'missing.ini').returncode, 2)

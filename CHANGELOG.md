@@ -1,5 +1,12 @@
 # 更新日志
 
+## [0.3.2](https://github.com/Verdient/network-monitor/releases/tag/v0.3.2) - 2026-11-22
+
+- 修复 Ubuntu 26.04 上使用自定义终端波特率时实时仪表盘启动报错的问题。Linux amd64 和 arm64 在设置即时按键前探测终端接口，并在退出时恢复原设置。
+- 恢复 `TERM=xterm` 等基础 ANSI 终端上下载、上传和合计的配色。
+- Linux 汇总当前进程可读取的网络命名空间中的 TCP 连接，包括宿主机上可见的 Docker 容器。读取不完整时标记「部分」。
+- `stats --traffic` 从首个有采样的周期开始显示，之后缺少采样的周期继续显示为 `—`。
+
 ## [0.3.1](https://github.com/Verdient/network-monitor/releases/tag/v0.3.1) - 2026-11-22
 
 - 新增 `-d` / `--day` 查询指定日期，以及 `stats --traffic` 按天、小时、分钟、秒或月汇总下载、上传和合计流量。

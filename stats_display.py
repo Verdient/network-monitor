@@ -193,13 +193,13 @@ class Dashboard:
         self.title_ink = ''
         if color:
             if theme != 'dark':
-                accents = LIGHT_COLORS if theme == 'light' else PORTABLE_COLORS
-                self.colors = {role: ('1;39' if role == 'ink' else '39') for role in BASIC}
-                for role, (rgb, index) in accents.items():
-                    self.colors[role] = self.palette_color(rgb, index, indexed)
-                if not (self.truecolor or indexed):
-                    for role in ('peer_location', 'peer_carrier', 'peer_asn', 'peer_name'):
-                        self.colors[role] = BASIC[role]
+                if self.truecolor or indexed:
+                    accents = LIGHT_COLORS if theme == 'light' else PORTABLE_COLORS
+                    self.colors = {role: ('1;39' if role == 'ink' else '39') for role in BASIC}
+                    for role, (rgb, index) in accents.items():
+                        self.colors[role] = self.palette_color(rgb, index)
+                else:
+                    self.colors = {**BASIC, 'ink': '1;39', 'frame': '39', 'grid': '39', 'muted': '39'}
                 self.title_ink = self.colors['ink']
             elif self.truecolor:
                 self.title_ink = '1;38;2;247;250;255'
@@ -211,21 +211,23 @@ class Dashboard:
         for role, stops in WAVE_SHADES.items():
             if not color:
                 inks = [''] * len(stops)
+            elif not (self.truecolor or indexed):
+                normal, bright = ('36', '96') if role == 'down' else ('35', '95')
+                if theme == 'light':
+                    bright = '1;' + normal
+                inks = [normal] * 4 + [bright] * 4
             elif theme != 'dark':
                 waves = LIGHT_WAVES if theme == 'light' else PORTABLE_WAVES
-                low, high = (self.palette_color(rgb, index, indexed) for rgb, index in waves[role])
+                low, high = (self.palette_color(rgb, index) for rgb, index in waves[role])
                 inks = [low] * 4 + [high] * 4
-            elif self.truecolor or indexed:
-                inks = [self.palette_color(rgb, index, indexed) for rgb, index in stops]
             else:
-                normal, bright = ('36', '96') if role == 'down' else ('35', '95')
-                inks = [normal] * 4 + [bright] * 4
+                inks = [self.palette_color(rgb, index) for rgb, index in stops]
             self.wave_inks[role] = inks
 
-    def palette_color(self, rgb, index, indexed):
+    def palette_color(self, rgb, index):
         if self.truecolor:
             return '38;2;{};{};{}'.format(*rgb)
-        return '38;5;{}'.format(index) if indexed else '39'
+        return '38;5;{}'.format(index)
 
     @staticmethod
     def tint(text, code):
@@ -554,7 +556,8 @@ class Dashboard:
             if not snapshot.status:
                 lines.append(self.paint('暂无已建立连接', 'muted'))
         lines.extend([''] * max(0, budget - 2 - len(lines)))
-        return self.panel('TCP 连接 · 本机', lines[:budget - 2], width=width, role='ink'), paging
+        title = 'TCP 连接 · 部分' if snapshot.partial else 'TCP 连接 · 本机'
+        return self.panel(title, lines[:budget - 2], width=width, role='ink'), paging
 
     def paint_button(self, text, role, enabled=True):
         if enabled:
@@ -666,7 +669,8 @@ class Dashboard:
     def connection_screen(self, connections, rows, page, click_targets=None):
         if self.columns < 24 or rows < 4:
             snap = connections[0]
-            lines = [clip(snap.status or 'TCP 已建立 {}'.format(snap.established), self.columns)]
+            label = 'TCP 部分已建立' if snap.partial else 'TCP 已建立'
+            lines = [clip(snap.status or '{} {}'.format(label, snap.established), self.columns)]
             paging = SINGLE_PAGE
         else:
             lines, paging = self.connection_panel(connections, self.columns, rows - 1, page)
@@ -876,7 +880,8 @@ class Dashboard:
                     lines.extend(sockets)
                 elif connections and len(lines) + 2 <= rows:
                     snap = connections[0]
-                    lines.append(clip('本机 TCP  ' + (snap.status or '已建立 {}'.format(snap.established)), self.columns))
+                    label = 'TCP 部分' if snap.partial else '本机 TCP'
+                    lines.append(clip(label + '  ' + (snap.status or '已建立 {}'.format(snap.established)), self.columns))
                 return self.live_screen(lines, rows, click_targets=click_targets)
             if summary.count:
                 output = [label + '  ' + traffic(summary.totals[i]) for label, i, _ in DIRECTIONS]

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Query daily SQLite partitions and display statistics in the selected zone."""
 from collections import deque
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
+import errno
 import math
 import os
 import re
@@ -396,22 +397,53 @@ def terminate(signum, _frame):
     raise SystemExit(128 + signum)
 
 
+def enter_cbreak(descriptor, cleanup):
+    import termios
+
+    if sys.platform == 'linux' and os.uname().machine in ('x86_64', 'aarch64'):
+        import fcntl
+        import struct
+
+        # Probe the kernel interface before writing so the legacy libc ABI
+        # never has to round-trip the custom baud rates of a termios2 terminal.
+        tcgets2, tcsets2 = 0x802c542a, 0x402c542b
+        layout = struct.Struct('=IIIIB19sII')
+        try:
+            snapshot = fcntl.ioctl(descriptor, tcgets2, bytes(layout.size))
+        except OSError as error:
+            if error.errno != errno.ENOTTY:
+                raise
+        else:
+            iflag, oflag, cflag, lflag, line, cc, ispeed, ospeed = layout.unpack(snapshot)
+            lflag &= ~(termios.ICANON | termios.ECHO)
+            cc = bytearray(cc)
+            cc[termios.VMIN], cc[termios.VTIME] = 1, 0
+            fcntl.ioctl(descriptor, tcsets2, layout.pack(iflag, oflag, cflag, lflag, line, cc, ispeed, ospeed))
+            cleanup.callback(fcntl.ioctl, descriptor, tcsets2, snapshot)
+            return
+
+    import tty
+
+    original = termios.tcgetattr(descriptor)
+    tty.setcbreak(descriptor, termios.TCSANOW)
+    cleanup.callback(termios.tcsetattr, descriptor, termios.TCSANOW, original)
+
+
 def query_terminal_theme():
     """Ask the terminal for its default background before printing a static report."""
     import select
     import signal
     import termios
-    import tty
 
     fallback = terminal_theme_hint()
     try:
         descriptor = sys.stdin.fileno()
         if os.ttyname(descriptor) != os.ttyname(sys.stdout.fileno()):
             return fallback
-        attributes = termios.tcgetattr(descriptor)
-        previous_handler = signal.signal(signal.SIGTERM, terminate)
-        try:
-            tty.setcbreak(descriptor, termios.TCSANOW)
+        with ExitStack() as cleanup:
+            previous_handler = signal.signal(signal.SIGTERM, terminate)
+            cleanup.callback(signal.signal, signal.SIGTERM, previous_handler)
+            enter_cbreak(descriptor, cleanup)
             if select.select([descriptor], [], [], 0)[0]:
                 return fallback
             sys.stdout.write(BACKGROUND_QUERY)
@@ -429,11 +461,6 @@ def query_terminal_theme():
                 reply = BACKGROUND_REPLY.search(data)
                 if reply:
                     return reply_theme(reply)
-        finally:
-            try:
-                termios.tcsetattr(descriptor, termios.TCSANOW, attributes)
-            finally:
-                signal.signal(signal.SIGTERM, previous_handler)
     except (OSError, ValueError, termios.error):
         pass
     return fallback
@@ -528,14 +555,17 @@ def run_live(render, changed, change_interval):
     import select
     import signal
     import termios
-    import tty
 
     descriptor = sys.stdin.fileno()
-    attributes = termios.tcgetattr(descriptor)
-
+    cleanup = ExitStack()
+    screen_open = False
     previous_handler = signal.signal(signal.SIGTERM, terminate)
     try:
-        tty.setcbreak(descriptor, termios.TCSANOW)
+        try:
+            enter_cbreak(descriptor, cleanup)
+        except (OSError, termios.error) as error:
+            raise RuntimeError('无法设置实时仪表盘的终端按键模式：{}'.format(error)) from error
+        screen_open = True
         sys.stdout.write('\033[?1049h\033[?25l' + ENABLE_MOUSE)
         color = 'NO_COLOR' not in os.environ
         theme = terminal_theme_hint() if color else None
@@ -571,7 +601,12 @@ def run_live(render, changed, change_interval):
 
             remaining = max(0, min(deadline, resize_deadline) - time.monotonic())
             if select.select([descriptor], [], [], min(remaining, RESIZE_POLL_SECONDS))[0]:
-                data = os.read(descriptor, 128)
+                try:
+                    data = os.read(descriptor, 128)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        return
+                    raise
                 if not data:
                     return
                 events, pending_input = live_input(pending_input + data)
@@ -620,10 +655,15 @@ def run_live(render, changed, change_interval):
                 # Redraw after the changes settle, or periodically during a long drag.
                 resize_deadline = min(now + RESIZE_DEBOUNCE_SECONDS, resize_started + RESIZE_MAX_DELAY_SECONDS)
     finally:
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, attributes)
-        sys.stdout.write(DISABLE_MOUSE + '\033[?2026l\033[?25h\033[?1049l')
-        sys.stdout.flush()
-        signal.signal(signal.SIGTERM, previous_handler)
+        try:
+            with suppress(OSError, termios.error):
+                cleanup.close()
+            if screen_open:
+                with suppress(OSError):
+                    sys.stdout.write(DISABLE_MOUSE + '\033[?2026l\033[?25h\033[?1049l')
+                    sys.stdout.flush()
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
 
 
 def print_plain(report, columns, height):
@@ -672,13 +712,19 @@ def print_plain(report, columns, height):
 
 def print_traffic(database, interface, zone, unit, periods):
     _, label, date_format = TRAFFIC_PERIODS[unit]
-    rows = [('周期起点', '下载', '上传', '合计')]
+    rows = []
     with storage.reader(database) as connection:
         for boundary, start, end in periods:
             totals = storage.traffic_totals(connection, interface, start, end)
+            if totals is None and not rows:
+                continue
             values = [traffic(totals[i]) for i in (1, 0, 2)] if totals is not None else ['—'] * 3
             rows.append((time_ranges.local_datetime(boundary, zone).strftime(date_format), *values))
     print('流量汇总（按{}）  网卡 {}  时区 {}'.format(label, interface, time_ranges.timezone_label(zone)))
+    if not rows:
+        print('暂无采样数据')
+        return
+    rows.insert(0, ('周期起点', '下载', '上传', '合计'))
     widths = [max(map(display_width, column)) for column in zip(*rows)]
     for row in rows:
         print('  '.join(pad(value, width, right=i > 0) for i, (value, width) in enumerate(zip(row, widths))))

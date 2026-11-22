@@ -1,15 +1,22 @@
+import fcntl
+from io import StringIO
 import os
-import re
 from pathlib import Path
+import re
+import signal
+import struct
+import sys
 from tempfile import TemporaryDirectory
+import termios
+from threading import Event
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import network_monitor
 from ip_traffic import PeerTraffic
-from stats import LiveSampler, dashboard_text, live_input, live_update, read_report, terminal_theme_hint
+from stats import LiveSampler, dashboard_text, live_input, live_update, read_report, run_live, terminal_theme_hint
 from stats_display import ANSI, Dashboard, LiveSample, Report, area_cells, connection_columns, display_width
 import storage
 from tcp_connections import Connections
@@ -105,6 +112,45 @@ class LiveUpdateTests(unittest.TestCase):
         self.assertEqual(events, ['i'])
         events, pending = live_input(pending + b'2M\x1b[<0;120;2m\x1b[3~n')
         self.assertEqual((events, pending), ([(119, 1), 'n'], b''))
+
+    @unittest.skipUnless(sys.platform == 'linux' and os.uname().machine in ('x86_64', 'aarch64'),
+                         'requires Linux termios2 on x86-64 or arm64')
+    def test_live_sets_cbreak_without_libc_and_preserves_custom_baud(self):
+        output = StringIO()
+        previous_handler = signal.getsignal(signal.SIGTERM)
+        master, slave = os.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        tcgets2, tcsets2 = 0x802c542a, 0x402c542b
+        layout = struct.Struct('=IIIIB19sII')
+        attributes = list(layout.unpack(fcntl.ioctl(slave, tcgets2, bytes(layout.size))))
+        cbaud, bother = 0x100f, 0x1000
+        attributes[2] = (attributes[2] & ~cbaud) | bother
+        attributes[-2:] = [14400, 14400]
+        fcntl.ioctl(slave, tcsets2, layout.pack(*attributes))
+        snapshot = fcntl.ioctl(slave, tcgets2, bytes(layout.size))
+
+        def frame(*_):
+            current = layout.unpack(fcntl.ioctl(slave, tcgets2, bytes(layout.size)))
+            self.assertFalse(current[3] & (termios.ICANON | termios.ECHO))
+            self.assertEqual(current[-2:], (14400, 14400))
+            return 'frame', float('inf'), [(0, 0, 1, 'c')], (0, 1)
+
+        render = Mock(side_effect=frame)
+        with patch('stats.sys.stdin.fileno', return_value=slave), patch('stats.sys.stdout', output), \
+                patch('stats.terminal_size', return_value=os.terminal_size((80, 24))), \
+                patch('tty.setcbreak') as cbreak, \
+                patch('select.select', return_value=([slave], [], [])), \
+                patch('stats.os.read', side_effect=[b'\x1b[<0;1;1M', b'c', b'q']):
+            run_live(render, Event(), Mock())
+        cbreak.assert_not_called()
+        self.assertEqual(fcntl.ioctl(slave, tcgets2, bytes(layout.size)), snapshot)
+        self.assertIs(signal.getsignal(signal.SIGTERM), previous_handler)
+        self.assertEqual([call.args[2] for call in render.call_args_list], ['traffic', 'connections', 'traffic'])
+        self.assertEqual(render.call_args.args[0].lines, 24)
+        self.assertIn('\033[?1000h', output.getvalue())
+        self.assertIn('\033[?1000l', output.getvalue())
+        self.assertTrue(output.getvalue().endswith('\033[?25h\033[?1049l'))
 
     def test_terminal_background_reply_can_be_fragmented_and_mixed_with_input(self):
         events, pending = live_input(b'\x1b]11;rgb:ffff/ff')
@@ -388,7 +434,7 @@ class LiveUpdateTests(unittest.TestCase):
         modes = (
             ({'COLORTERM': 'truecolor'}, ('38;2;0;87;117', '1;38;2;79;248;238', '38;2;0;135;140')),
             ({'TERM': 'xterm-256color'}, ('38;5;24', '1;36', '38;5;30')),
-            ({'TERM': 'xterm'}, ('39', '1;36', '39')),
+            ({'TERM': 'xterm'}, ('1;36', '1;36', '1;36')),
         )
         for env, foregrounds in modes:
             for live in (None, sampler):
@@ -404,6 +450,9 @@ class LiveUpdateTests(unittest.TestCase):
                         styles = re.sub(r'38;(?:2;\d+;\d+;\d+|5;\d+)', '39', body)
                         self.assertNotRegex(styles, r'\x1b\[(?:[0-9]+;)*(?:7|4[0-8]|10[0-7])(?:;|m)')
                         self.assertIn('\033[{}m┏━'.format(foreground), screen)
+                        if env.get('TERM') == 'xterm':
+                            self.assertIn('\033[1;35m┏━', screen)
+                            self.assertIn('\033[1;33m┏━', screen)
                         if theme != 'dark':
                             self.assertIn('\033[1;39m NETWORK MONITOR \033[0m', screen)
         with patch.dict(os.environ, {'NO_COLOR': '1', 'COLORTERM': 'truecolor'}, clear=True):
@@ -441,12 +490,14 @@ class LiveUpdateTests(unittest.TestCase):
     def test_wave_colors_follow_rates_in_both_directions_even_in_a_one_row_chart(self):
         values = [0.5, None, 4, None, 9, None]
         chart = (0, 6, 1, [values, values, [None] * 6])
-        for mode in ({'truecolor': True}, {'indexed': True}, {}):
+        for mode in ({'truecolor': True, 'theme': 'dark'}, {'indexed': True, 'theme': 'dark'},
+                     *({'theme': theme} for theme in ('dark', 'light', None))):
             with self.subTest(mode=mode):
-                display = Dashboard(80, color=True, theme='dark', **mode)
+                display = Dashboard(80, color=True, **mode)
                 lines = display.graph(chart, 1, None, live=True)
                 traces = [line for line in lines if '┤' in line]
                 self.assertEqual(len(traces), 2)
+                self.assertTrue(set(display.wave_inks['down']).isdisjoint(display.wave_inks['up']))
                 for role, line in zip(('down', 'up'), traces):
                     inks = display.wave_inks[role]
                     runs = re.findall(r'\x1b\[([0-9;]+)m[\u2801-\u28ff]+', line)

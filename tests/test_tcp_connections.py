@@ -15,17 +15,40 @@ class SocketTableTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             root = Path(directory)
+            local = root / 'net'
+            local.mkdir()
             ipv4 = bytes((192, 0, 2, 4))
             remote = encode_words(ipv4)
-            (root / 'tcp').write_text('sl local_address rem_address st\n' + '\n'.join(
+            (local / 'tcp').write_text('sl local_address rem_address st\n' + '\n'.join(
                 '0: ignored {}:0001 {}'.format(remote, state) for state in ('01', '0A', '06', '03')))
             mapped = encode_words(bytes(10) + bytes.fromhex('ffff') + ipv4)
-            (root / 'tcp6').write_text('sl local_address remote_address st\n0: ignored ' + mapped + ':0002 01\n')
+            (local / 'tcp6').write_text('sl local_address remote_address st\n0: ignored ' + mapped + ':0002 01\n')
             with patch('tcp_connections.sys.platform', 'linux'), patch('tcp_connections.linux_sockets',
                                                                        return_value=linux_sockets(root)):
                 self.assertEqual(read_connections(), Connections(2, 1, 1, 1, (('192.0.2.4', 2),)))
-            (root / 'tcp6').unlink()
-            self.assertEqual(len(list(linux_sockets(root))), 4)
+            (local / 'tcp6').unlink()
+            self.assertEqual(len(linux_sockets(root)[0]), 4)
+
+    def test_linux_counts_shared_namespace_tables_once_and_reports_unreadable_tables(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / 'net'
+            container = root / '10/net'
+            shared = root / '11/net'
+            unreadable = root / '12/net'
+            for table_directory in (local, container, shared, unreadable):
+                table_directory.mkdir(parents=True)
+            header = 'sl local_address rem_address st\n'
+            (local / 'tcp').write_text(header + '0: ignored 00000000:0001 06\n')
+            (container / 'tcp').write_text(header + '0: ignored 00000000:0001 0A\n')
+            (container / 'tcp6').write_text(header + '0: ignored 00000000:0002 0A\n')
+            (shared / 'tcp').hardlink_to(container / 'tcp')
+            (shared / 'tcp6').hardlink_to(container / 'tcp6')
+            (unreadable / 'tcp').write_text('invalid table')
+            (root / '13').mkdir()  # The process disappeared before its TCP tables were read.
+            with patch('tcp_connections.sys.platform', 'linux'), patch('tcp_connections.linux_sockets',
+                                                                       return_value=linux_sockets(root)):
+                self.assertEqual(read_connections(), Connections(listening=2, time_wait=1, partial=True))
 
     def test_darwin_reads_numeric_ipv4_and_scoped_ipv6(self):
         output = '''Active Internet connections (including servers)

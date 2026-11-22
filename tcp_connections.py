@@ -18,31 +18,62 @@ class Connections:
     other: int = 0
     peers: tuple = ()
     status: str = ''
+    partial: bool = False
 
 
-def linux_sockets(directory=Path('/proc/net')):
-    for name in ('tcp', 'tcp6'):
-        try:
-            source = (directory / name).open(encoding='ascii')
-        except FileNotFoundError:
-            if name == 'tcp6':  # IPv6 can be disabled in the kernel.
-                continue
-            raise
-        with source:
-            if 'local_address' not in source.readline():
-                raise ValueError('无效的 TCP 表')
-            states = {'01': 'ESTABLISHED', '0A': 'LISTEN', '06': 'TIME_WAIT'}
-            for row in source:
-                _, _, remote, state, *_ = row.split()
-                peer = None
-                if state == '01':
-                    addr, _ = remote.split(':')
-                    # procfs encodes each 32-bit word in the host byte order.
-                    packed = b''.join(int(addr[i:i + 8], 16).to_bytes(4, sys.byteorder)
-                                      for i in range(0, len(addr), 8))
-                    address = ip_address(packed)
-                    peer = str(getattr(address, 'ipv4_mapped', None) or address)
-                yield states.get(state, 'OTHER'), peer
+def linux_tcp_table(source):
+    if 'local_address' not in source.readline():
+        raise ValueError('无效的 TCP 表')
+    states = {'01': 'ESTABLISHED', '0A': 'LISTEN', '06': 'TIME_WAIT'}
+    for row in source:
+        _, _, remote, state, *_ = row.split()
+        peer = None
+        if state == '01':
+            addr, _ = remote.split(':')
+            # procfs encodes each 32-bit word in the host byte order.
+            packed = b''.join(int(addr[i:i + 8], 16).to_bytes(4, sys.byteorder)
+                              for i in range(0, len(addr), 8))
+            address = ip_address(packed)
+            peer = str(getattr(address, 'ipv4_mapped', None) or address)
+        yield states.get(state, 'OTHER'), peer
+
+
+def linux_sockets(proc=Path('/proc')):
+    local = proc / 'net'
+    directories = [local]
+    partial = False
+    try:
+        with os.scandir(proc) as entries:
+            directories.extend(proc / entry.name / 'net' for entry in entries if entry.name.isdecimal())
+    except OSError:
+        partial = True
+
+    sockets = []
+    seen = set()
+    for directory in directories:
+        for name in ('tcp', 'tcp6'):
+            try:
+                path = directory / name
+                # Processes in the same network namespace share the procfs TCP table inode.
+                table = path.stat()
+                if (table.st_dev, table.st_ino) in seen:
+                    continue
+                with path.open(encoding='ascii') as source:
+                    table = os.fstat(source.fileno())
+                    key = table.st_dev, table.st_ino
+                    if key in seen:
+                        continue
+                    rows = list(linux_tcp_table(source))
+                seen.add(key)
+                sockets.extend(rows)
+            except (FileNotFoundError, ProcessLookupError):
+                if directory == local and name == 'tcp':
+                    raise
+            except (OSError, ValueError):
+                if directory == local:
+                    raise
+                partial = True
+    return sockets, partial
 
 
 def darwin_sockets(output):
@@ -64,13 +95,14 @@ def darwin_sockets(output):
 
 def read_connections():
     try:
+        partial = False
         if sys.platform == 'darwin':
             output = subprocess.check_output(
                 ['/usr/sbin/netstat', '-anW', '-p', 'tcp'], text=True, stderr=subprocess.DEVNULL,
                 env=dict(os.environ, LC_ALL='C'), timeout=3)
             sockets = darwin_sockets(output)
         elif sys.platform.startswith('linux'):
-            sockets = linux_sockets()
+            sockets, partial = linux_sockets()
         else:
             return Connections(status='系统不支持')
         states, peers = Counter(), Counter()
@@ -80,7 +112,7 @@ def read_connections():
                 peers[peer] += 1
         est, listen, wait = (states.pop(s, 0) for s in ('ESTABLISHED', 'LISTEN', 'TIME_WAIT'))
         ranked = sorted(peers.items(), key=lambda item: (-item[1], item[0]))
-        return Connections(est, listen, wait, sum(states.values()), tuple(ranked))
+        return Connections(est, listen, wait, sum(states.values()), tuple(ranked), partial=partial)
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return Connections(status='连接表不可用')
 
