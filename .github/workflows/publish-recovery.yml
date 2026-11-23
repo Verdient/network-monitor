@@ -1,0 +1,100 @@
+name: 发布已验收的 Release
+
+on:
+  push:
+    branches: [publish/v0.3.4]
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  BUILD_RUN: "45205840891"
+  RELEASE_TAG: v0.3.4
+
+jobs:
+  brew-arm64:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.3.4
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.BUILD_RUN }}
+          path: assets
+          merge-multiple: true
+      - name: 验证 Apple Silicon Homebrew 安装
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          test "$(uname -m)" = arm64
+          python scripts/release.py formula --assets assets --output formula
+          python - <<'PY'
+          from pathlib import Path
+          from version import __version__
+          path = Path('formula/network-monitor.rb')
+          formula = path.read_text()
+          for archive in Path('assets').glob('*.tar.gz'):
+              url = f'https://github.com/Verdient/network-monitor/releases/download/v{__version__}/{archive.name}'
+              formula = formula.replace(url, archive.resolve().as_uri())
+          path.write_text(formula)
+          PY
+          brew tap-new local/network-monitor
+          cp formula/network-monitor.rb "$(brew --repository local/network-monitor)/Formula/network-monitor.rb"
+          brew install local/network-monitor/network-monitor
+          brew test local/network-monitor/network-monitor
+          test "$(network-monitor -v)" = "network-monitor 0.3.4"
+  publish:
+    needs: brew-arm64
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.3.4
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 验证原发布构建
+        run: |
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .head_sha)" = "$(git rev-parse HEAD)"
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN/jobs?per_page=40" > jobs.json
+          python - <<'PY'
+          import json
+          jobs = {job['name']: job['conclusion'] for job in json.load(open('jobs.json'))['jobs']}
+          required = ('build (macos-15, arm64)', 'build (macos-15-intel, x86_64)',
+                      'deb / build (ubuntu-24.04, amd64)', 'deb / build (ubuntu-24.04-arm, arm64)',
+                      'brew-test (macos-15-intel)')
+          assert all(jobs.get(name) == 'success' for name in required), jobs
+          PY
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.BUILD_RUN }}
+          path: assets
+          merge-multiple: true
+      - name: 发布四个架构的安装包
+        run: |
+          python scripts/release.py formula --assets assets --output formula
+          test "$(wc -l < formula/SHA256SUMS)" -eq 4
+          (cd assets && sha256sum -c ../formula/SHA256SUMS)
+          python scripts/release.py notes
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state; then
+            test "$(cat release-state)" = true
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" assets/*.tar.gz assets/*.deb formula/SHA256SUMS formula/network-monitor.rb --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
