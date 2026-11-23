@@ -1,4 +1,4 @@
-"""Resolve visible public peers through rate-limited HTTPS APIs."""
+"""Resolve visible public peers from local GeoIP data, falling back to rate-limited HTTPS APIs."""
 
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -22,8 +22,10 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from chinese_text import simplify_chinese
+from geoip_local import LocalGeoIP
 from ip_location_cache import (
-    DAY, LOCATION_FORMAT_VERSION, cached_location, open_cache, postpone_requests, reserve_request, save_location,
+    DAY, LOCATION_FORMAT_VERSION, cache_path, cached_location, open_cache, postpone_requests, reserve_request,
+    save_location,
 )
 
 
@@ -64,6 +66,8 @@ US_STATES = {
     '加州': '加利福尼亚州', '德克萨斯州': '得克萨斯州', '哥伦比亚特区': '华盛顿特区',
 }
 DETAILED_COUNTRIES = {'中国', '美国'}
+# DB-IP sometimes appends the district, e.g. "Guangzhou (Yuexiu Qu)".
+DISTRICT_SUFFIX = re.compile(r'\s*\([^()]*\)$')
 UNKNOWN_PLACES = {'', '-', 'n/a', 'unknown', '未知'}
 RETRY_DELAY = 60
 RESULT_TTL = 30 * DAY
@@ -220,6 +224,30 @@ def country_is_details(payload):
     return peer_details(payload.get('country'))
 
 
+def record_name(record, *languages):
+    names = record.get('names') if isinstance(record, dict) else None
+    if not isinstance(names, dict):
+        return ''
+    return next((names[language] for language in languages if isinstance(names.get(language), str)), '')
+
+
+def local_details(records):
+    """Convert DB-IP city and ASN records into the same labels the APIs produce."""
+    city, network = records
+    country = city.get('country') if isinstance(city.get('country'), dict) else {}
+    subdivisions = city.get('subdivisions')
+    region = subdivisions[0] if isinstance(subdivisions, list) and subdivisions else {}
+    # English names match the province, state and city alias tables; Chinese names are fallbacks.
+    return peer_details(country.get('iso_code'), record_name(country, 'zh-CN', 'en'),
+                        record_name(region, 'en', 'zh-CN'), network.get('autonomous_system_organization'),
+                        city=DISTRICT_SUFFIX.sub('', record_name(city.get('city'), 'en', 'zh-CN')),
+                        asn=network.get('autonomous_system_number', ''))
+
+
+def local_geoip(changed):
+    return LocalGeoIP(cache_path().parent / 'geoip', changed, tls_context=geo_tls_context(), convert=local_details)
+
+
 def missing_city(location):
     region, _, country = location.partition('·')
     return country in DETAILED_COUNTRIES and region not in CITY_EQUIVALENT_REGIONS
@@ -284,9 +312,11 @@ def retry_time(error, now, provider):
 
 
 class IPLocations:
-    def __init__(self, changed, cache_file=None):
+    def __init__(self, changed, cache_file=None, geoip=None):
         self.changed = changed
         self.cache_file = cache_file
+        # Local GeoIP data answers first while fresh; the APIs cover gaps and stale data.
+        self.geoip = geoip
         self.lock = threading.Lock()
         self.closed = threading.Event()
         self.requests = Queue(maxsize=32)
@@ -297,6 +327,20 @@ class IPLocations:
         address, local = classify_address(address)
         if not address:
             return local
+        if self.geoip is not None:
+            self.geoip.start()
+            details = self.geoip.lookup(address)
+            if details is not None and details.location:
+                return details
+        details = self._lookup_online(address)
+        if not any(details) and self.geoip is not None:
+            # Outdated local data is still better than nothing while the APIs have no answer.
+            stale = self.geoip.lookup(address, stale=True)
+            if stale is not None:
+                return stale
+        return details
+
+    def _lookup_online(self, address):
         with self.lock:
             details, retry_at = self.cache.get(address, (PeerDetails(), 0))
             if self.closed.is_set() or time.time() < retry_at:
@@ -399,6 +443,8 @@ class IPLocations:
 
     def close(self):
         self.closed.set()
+        if self.geoip is not None:
+            self.geoip.close()
         if self.worker is not None:
             try:
                 self.requests.put_nowait(None)

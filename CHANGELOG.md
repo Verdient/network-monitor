@@ -1,5 +1,11 @@
 # 更新日志
 
+## [0.3.4](https://github.com/Verdient/network-monitor/releases/tag/v0.3.4) - 2026-11-23
+
+- IP 页优先使用本地 DB-IP City Lite 和 ASN Lite 数据，每天检查一次更新。更新失败时，仅当构建和下载时间均超过 90 天才视为过期。
+- 实时和历史仪表盘分别显示 LIVE 和 ARCHIVE。分周期流量汇总在终端中加入上下行分布、峰值、当前周期和合计。
+- 补齐源码安装时 IP 页和连接页所需的 GeoIP 文件，移除 Homebrew 配方中弃用的安装钩子。
+
 ## [0.3.3](https://github.com/Verdient/network-monitor/releases/tag/v0.3.3) - 2026-11-22
 
 - TCP 页按本地 IP 汇总入站和出站连接、临时端口利用率和估计余量。多地址网卡可先看总览，再按数字键或点击地址查看各出站目标。

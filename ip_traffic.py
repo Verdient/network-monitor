@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from ip_location import IPLocations, peer_ip
+from ip_location import IPLocations, local_geoip, peer_ip
 
 
 def system_environment():
@@ -135,7 +135,7 @@ class IPTraffic:
         self.hostname_requests = Queue(maxsize=32)
         self.hostname_worker = None
         self.closed = threading.Event()
-        self.locations = IPLocations(changed)
+        self.locations = IPLocations(changed, geoip=local_geoip(changed))
 
     def start(self):
         binary = shutil.which('tcpdump')

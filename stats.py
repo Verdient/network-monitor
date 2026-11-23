@@ -239,16 +239,17 @@ def run(args, parser):
 
     try:
         zone = time_ranges.timezone(args.timezone)
+        now = time.time() if unit else None
         if args.day is not None:
             initial_range = time_ranges.day_range(args.day, zone)
         elif window is not None:
-            end = time.time()
+            end = time.time() if now is None else now
             start = end - window
             time_ranges.local_datetime(start, zone)
             initial_range = start, end
         elif unit:
             start = time_ranges.parse_time(args.start, zone) if args.start is not None else None
-            end = time_ranges.parse_time(args.end, zone) if args.end is not None else time.time()
+            end = time_ranges.parse_time(args.end, zone) if args.end is not None else now
             if start is not None and start >= end:
                 raise ValueError('开始时间必须早于结束时间；查询范围为 [start, end)')
             initial_range = start, end
@@ -262,7 +263,13 @@ def run(args, parser):
     interface = args.interface or monitor.default_interface()
 
     if unit:
-        print_traffic(args.database, interface, zone, unit, periods)
+        display = None
+        current_period = None
+        if dashboard:
+            theme = query_terminal_theme() if terminal and 'NO_COLOR' not in os.environ else None
+            display = make_dashboard(terminal, terminal_size(terminal).columns or 100, theme=theme, zone=zone)
+            current_period = time_ranges.period_start(math.floor(now), unit, zone)
+        print_traffic(args.database, interface, zone, unit, periods, display, current_period)
     elif args.live:
         from functools import lru_cache
         from tcp_connections import ConnectionReader
@@ -467,22 +474,27 @@ def query_terminal_theme():
     return fallback
 
 
+def make_dashboard(terminal, terminal_width, sampler=None, theme=None, zone=None):
+    # Leave one column on each side to keep the frame off the terminal edge.
+    margin = 1 if terminal and terminal_width > 2 else 0
+    color = terminal and 'NO_COLOR' not in os.environ
+    truecolor = os.environ.get('COLORTERM', '').lower() in ('truecolor', '24bit')
+    term = os.environ.get('TERM', '')
+    display = Dashboard(terminal_width - 2 * margin, color=color, truecolor=truecolor, indexed='256color' in term,
+                        interval=sampler.interval if sampler else REFRESH_SECONDS, theme=theme, zone=zone)
+    display.margin = margin
+    return display
+
+
 def dashboard_text(args, interface, zone, times, terminal, sampler=None, size=None,
                    query=None, view='traffic', peer_page=0, ip_capture=None, ip_sort=None, click_targets=None,
                    theme=None, paging=None, connection_key=None):
     if size is None:
         size = terminal_size(terminal)
-    terminal_width = size.columns or 100
     rows = size.lines or 30
-    # Leave one column on each side to keep the frame off the terminal edge.
-    margin = 1 if terminal and terminal_width > 2 else 0
-    width = terminal_width - 2 * margin
+    display = make_dashboard(terminal, size.columns or 100, sampler, theme, zone)
+    margin, width = display.margin, display.columns
     compact = width < 34 or (sampler is not None and rows < 17)
-    color = terminal and 'NO_COLOR' not in os.environ
-    truecolor = os.environ.get('COLORTERM', '').lower() in ('truecolor', '24bit')
-    term = os.environ.get('TERM', '')
-    display = Dashboard(width, color=color, truecolor=truecolor, indexed='256color' in term,
-                        interval=sampler.interval if sampler else REFRESH_SECONDS, theme=theme, zone=zone)
     rail = 0 if args.no_chart else metric_rail_width(width, rows, args.width, args.height)
     graph_width = width - rail - bool(rail)
     columns = None if args.no_chart or compact else min(args.width or graph_width, graph_width - 12)
@@ -741,23 +753,35 @@ def print_plain(report, columns, height):
         draw_charts(*chart, columns, height, zone)
 
 
-def print_traffic(database, interface, zone, unit, periods):
-    _, label, date_format = TRAFFIC_PERIODS[unit]
+def traffic_rows(database, interface, zone, unit, periods):
+    """Return (label, totals, period boundary) from the first period with samples onwards."""
+    _, _, date_format = TRAFFIC_PERIODS[unit]
     rows = []
     with storage.reader(database) as connection:
         for boundary, start, end in periods:
             totals = storage.traffic_totals(connection, interface, start, end)
             if totals is None and not rows:
                 continue
-            values = [traffic(totals[i]) for i in (1, 0, 2)] if totals is not None else ['—'] * 3
-            rows.append((time_ranges.local_datetime(boundary, zone).strftime(date_format), *values))
+            rows.append((time_ranges.local_datetime(boundary, zone).strftime(date_format), totals, boundary))
+    return rows
+
+
+def print_traffic(database, interface, zone, unit, periods, display=None, current_period=None):
+    _, label, _ = TRAFFIC_PERIODS[unit]
+    rows = traffic_rows(database, interface, zone, unit, periods)
+    if display is not None:
+        table = display.traffic_table(interface, time_ranges.timezone_label(zone), label, rows, current_period)
+        print('\n'.join(' ' * display.margin + line for line in table.split('\n')))
+        return
     print('流量汇总（按{}）  网卡 {}  时区 {}'.format(label, interface, time_ranges.timezone_label(zone)))
     if not rows:
         print('暂无采样数据')
         return
-    rows.insert(0, ('周期起点', '下载', '上传', '合计'))
-    widths = [max(map(display_width, column)) for column in zip(*rows)]
-    for row in rows:
+    table = [('周期起点', '下载', '上传', '合计')]
+    table.extend((stamp, *([traffic(totals[i]) for i in (1, 0, 2)] if totals is not None else ['—'] * 3))
+                 for stamp, totals, _ in rows)
+    widths = [max(map(display_width, column)) for column in zip(*table)]
+    for row in table:
         print('  '.join(pad(value, width, right=i > 0) for i, (value, width) in enumerate(zip(row, widths))))
 
 

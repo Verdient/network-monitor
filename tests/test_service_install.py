@@ -6,6 +6,7 @@ import plistlib
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -56,6 +57,18 @@ class ServiceTests(unittest.TestCase):
         service_install.atomic_write(plan.service, plan.service_content, 0o644)
         result = subprocess.run(['systemd-analyze', 'verify', '--man=no', str(plan.service)],
                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_source_install_can_load_stats_and_ip_metadata_in_isolation(self):
+        plan = self.plan('Linux', '--user')
+        service_install.install_program(plan)
+        result = subprocess.run(
+            [sys.executable, '-I', '-c',
+             'import sys; sys.path.insert(0, sys.argv[1]); '
+             'import stats, ip_traffic; '
+             'from ip_location import territories, city_aliases; '
+             'assert territories()["CN"] == "中国"; assert city_aliases()',
+             str(plan.work_dir / 'app')], cwd=self.root, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_launchd_plist_keeps_paths_as_arguments_and_selects_domain(self):

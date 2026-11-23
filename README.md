@@ -112,6 +112,8 @@ network-monitor stats
 
 直接在终端运行 `network-monitor` 即可查看默认网卡的实时仪表盘，按 `q` 退出。`network-monitor -h` 列出实时选项和可用命令。运行 `network-monitor stats` 可查看一次历史统计，默认查询系统时区当天的数据。
 
+实时主页以下载配色显示 `● LIVE`，圆点随采样变化。连接页和 IP 页的标题行在空间足够时也显示 `LIVE`。历史统计使用琥珀色的 `◆ ARCHIVE`，页眉边角沿用下载配色。
+
 在终端中，宽屏左侧显示下载、上传和合计，右侧显示同一时段的波形。实时采样时大号数字显示当前网速，查历史时显示累计流量。缩小窗口后，统计移到波形上方。流量占比按所查时段的累计字节数计算。
 
 青色下载画在零线上方，粉色上传画在下方，两侧独立标尺，波形用不同色阶区分速率。箭头标出每个方向最高的分段平均速率，空间足够时还会显示该段的起止时间。零线上的琥珀色虚线 `┄` 表示该段缺少采样，实测速率为零时，波形贴着零线。
@@ -146,7 +148,9 @@ network-monitor --last 15m --interval 0.5
 
 IP 页使用 `tcpdump`，需要当前用户有权在所选网卡上抓包。macOS 自带该工具，Debian / Ubuntu 上可用 `sudo apt install tcpdump` 安装。「对端 IP」按顺序显示 IP、地域、运营商、AS 号和系统反查名称，颜色逐级减淡。AS 号由地域数据源在同一请求中提供，例如 `AS45102`。地址栏空间不足时，附加信息放在下一行。
 
-IPv4 私有网段、IPv6 唯一本地网段和链路本地地址直接标记为「局域网」。程序在后台通过 HTTPS 将当前页的公网对端 IP 发送给地域数据源，以查询地域和运营商。遇到限流、错误或信息不足时，按表中顺序尝试下一个来源。中国大陆 IP 有城市信息时显示为「杭州·浙江·中国」，缺少城市时显示为「浙江·中国」。直辖市和港澳台显示为「北京·中国」「香港·中国」「澳门·中国」「台湾·中国」等。美国 IP 显示为「山景城·加利福尼亚·美国」，缺少城市或州时逐级简化。其他国家显示中文国家名称。
+IPv4 私有网段、IPv6 唯一本地网段和链路本地地址直接标记为「局域网」。公网对端 IP 优先查询本机的 GeoIP 数据库，不会发送到网络。本机没有可用数据库时，程序在后台通过 HTTPS 将当前页的公网对端 IP 发送给地域数据源，以查询地域和运营商。遇到限流、错误或信息不足时，按表中顺序尝试下一个来源。
+
+首次查询公网 IP 时，程序在后台下载 [DB-IP](https://db-ip.com) 的开源 IP to City Lite 和 IP to ASN Lite 数据库（压缩后约 65 MB，解压后约 140 MB）。下载完成前使用在线数据源，完成后立即改为本地查询。DB-IP 按月发布，程序每 24 小时在后台检查一次。服务器确认文件未变化时复用本地文件，当月文件尚未发布时检查上月版。City 和 ASN 分别判断。只有最近一次更新检查失败，且数据库的构建时间和最近一次成功下载的时间距今都超过 90 天，才视为过期。无下载记录时用本地文件的修改时间估算。服务器确认文件未变化只更新检查时间。City 过期后优先使用在线数据源，在线查询也无结果时才使用旧库。只有 ASN 过期时，仍显示本地地域并省略旧 ASN 信息。本地数据库查不到的地址同样改用在线数据源。数据库保存在缓存目录的 `network-monitor/geoip/` 下，删除后会重新下载。多个终端同时运行时只有一个会下载，其他终端自动加载下载结果。[IP Geolocation by DB-IP](https://db-ip.com)，采用 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 许可。中国大陆 IP 有城市信息时显示为「杭州·浙江·中国」，缺少城市时显示为「浙江·中国」。直辖市和港澳台显示为「北京·中国」「香港·中国」「澳门·中国」「台湾·中国」等。美国 IP 显示为「山景城·加利福尼亚·美国」，缺少城市或州时逐级简化。其他国家显示中文国家名称。
 
 系统反查返回的 `_gateway` 显示为「默认网关」。已知组播地址会显示协议用途，例如 `ff02::16` 对应「MLDv2 路由器组播」，`ff02::1:2` 对应「DHCPv6 中继/服务器组播」。其他组播地址按 IP 版本标记为「IPv4 组播」或「IPv6 组播」。
 
@@ -163,7 +167,7 @@ IPv4 私有网段、IPv6 唯一本地网段和链路本地地址直接标记为�
 
 **Network Monitor uses IP2Location.io [IP geolocation](https://www.ip2location.io) web service.**
 
-查询结果在本机缓存 30 天。各来源均查不到的结果缓存 24 小时，超时或限流按服务状态重试。缓存和请求记录共用当前用户的 `network-monitor/ip-location.sqlite3`，Linux 位于 `XDG_CACHE_HOME`（默认 `~/.cache`），macOS 位于 `~/Library/Caches`。收到 HTTP 429 时按 `Retry-After` 暂停对应来源，IP2Location.io 的无密钥额度用尽时暂停至下一个 UTC 零点。中文国家名称来自 Unicode CLDR 48，随程序附带许可证。[CLDR 48](https://github.com/unicode-org/cldr-json/tree/48.0.0) · [Unicode 许可证](https://github.com/Verdient/network-monitor/blob/main/geo_data/LICENSE.unicode)
+在线查询结果在本机缓存 30 天。各来源均查不到的结果缓存 24 小时，超时或限流按服务状态重试。缓存和请求记录共用当前用户的 `network-monitor/ip-location.sqlite3`，Linux 位于 `XDG_CACHE_HOME`（默认 `~/.cache`），macOS 位于 `~/Library/Caches`。收到 HTTP 429 时按 `Retry-After` 暂停对应来源，IP2Location.io 的无密钥额度用尽时暂停至下一个 UTC 零点。中文国家名称来自 Unicode CLDR 48，随程序附带许可证。[CLDR 48](https://github.com/unicode-org/cldr-json/tree/48.0.0) · [Unicode 许可证](https://github.com/Verdient/network-monitor/blob/main/geo_data/LICENSE.unicode)
 
 按 `q` 退出。`--last` 支持秒 `s`、分钟 `m`、小时 `h` 和天 `d`，可单独使用。
 使用 `network-monitor stats --plain` 可输出纯文本统计。`network-monitor stats` 重定向输出时也默认使用纯文本。设置 `NO_COLOR=1` 可保留仪表盘并关闭颜色。
@@ -210,6 +214,8 @@ network-monitor stats --traffic month --end 2026-11-01
 ```
 
 周期按所选时区划分。可用 `--day`、`--last` 或 `--start` / `--end` 限定汇总范围，表中最多显示该范围内最近的 `--count` 个周期。表格从第一个有采样的周期开始显示，之后缺少采样的周期用 `—` 标记。整个范围都没有采样时显示「暂无采样数据」。
+
+在终端中，每个周期右侧画一条分布条，青色为下载、粉色为上传，长度按最大周期缩放。`▲ 峰值` 标出流量最大的周期，`▸ 进行中` 标出尚未结束的当前周期，表尾显示合计、下载占比和周期平均值。窗口较窄时依次省略下载与上传列、分布条和标记。重定向输出或使用 `--plain` 时输出纯文本表格。
 
 ### 选择时区与显示方式
 

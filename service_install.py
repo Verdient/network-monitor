@@ -19,8 +19,9 @@ import install_paths
 
 LABEL = 'io.network-monitor'
 UNIT = 'network-monitor.service'
-SOURCE_FILES = ('network_monitor.py', 'monitor.py', 'stats.py', 'stats_display.py', 'tcp_connections.py',
-                'ip_traffic.py', 'configuration.py',
+SOURCE_FILES = ('network_monitor.py', 'monitor.py', 'stats.py', 'stats_display.py', 'display_base.py',
+                'display_live.py', 'display_history.py', 'tcp_connections.py', 'ip_traffic.py', 'configuration.py',
+                'ip_location.py', 'ip_location_cache.py', 'geoip_local.py', 'mmdb.py', 'chinese_text.py',
                 'cli_support.py', 'shell_completion.py', 'service_install.py', 'storage.py', 'time_ranges.py',
                 'install_paths.py', 'version.py')
 
@@ -207,8 +208,12 @@ def install_program(plan):
                     raise
     else:
         app = plan.work_dir / 'app'
+        source = Path(__file__).resolve().parent
         for name in SOURCE_FILES:
-            atomic_write(app / name, (Path(__file__).resolve().parent / name).read_bytes(), 0o644)
+            atomic_write(app / name, (source / name).read_bytes(), 0o644)
+        for path in (source / 'geo_data').rglob('*'):
+            if path.is_file():
+                atomic_write(app / path.relative_to(source), path.read_bytes(), 0o644)
         launcher = '#!/bin/sh\nexec {} {} "$@"\n'.format(
             shlex.quote(str(Path(sys.executable).resolve())), shlex.quote(str(app / 'network_monitor.py')))
         atomic_write(plan.executable, launcher.encode('utf-8'), 0o755)

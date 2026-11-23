@@ -205,6 +205,13 @@ class CommandTests(unittest.TestCase):
         result = self.invoke(*options, 'hour', '--day', '2026-11-19')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r'2026-11-19 12:00 \+0000\s+5\.00 MB\s+7\.00 MB\s+12\.00 MB')
+        dashboard = self.invoke(*options, 'hour', '--day', '2026-11-19', '--dashboard')
+        self.assertEqual(dashboard.returncode, 0, dashboard.stderr)
+        self.assertNotIn('\033', dashboard.stdout)
+        lines = dashboard.stdout.splitlines()
+        self.assertRegex(lines[0], r'流量汇总 · 按小时.*ARCHIVE')
+        self.assertRegex(dashboard.stdout, r'2026-11-19 12:00 \+0000\s+5\.00 MB\s+7\.00 MB\s+12\.00 MB.*▲ 峰值')
+        self.assertTrue(lines[-1].startswith('└'))
 
         writer = storage.Writer(self.cwd / 'samples.db')
         try:

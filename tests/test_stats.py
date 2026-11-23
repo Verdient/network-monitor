@@ -36,6 +36,60 @@ class HistoricalDashboardTests(unittest.TestCase):
                 self.assertRegex(lines[-1], r'^└.*┘ └.*┘$')
                 self.assertRegex(lines[-2], r'\d{2}:\d{2}')
 
+    def test_traffic_table_marks_peak_gaps_and_the_running_period(self):
+        rows = [('2026-11-01', (1_000_000, 4_000_000, 5_000_000), 0),
+                ('2026-11-02', (2_000_000, 9_000_000, 11_000_000), 100),
+                ('2026-11-03', None, 200),
+                ('2026-11-04', (500_000, 1_500_000, 2_000_000), 300)]
+        for width in (120, 80, 52, 40, 20):
+            for color in (True, False):
+                with self.subTest(width=width, color=color):
+                    table = Dashboard(width, color=color, truecolor=True, theme='dark').traffic_table(
+                        'en0', 'UTC', '天', rows, current_period=300)
+                    lines = ANSI.sub('', table).splitlines()
+                    self.assertTrue(all(display_width(line) <= width for line in lines))
+                    self.assertIn('流量汇总', lines[0])
+                    if width < 34:
+                        self.assertEqual(len(lines), 1 + len(rows))
+                        continue
+                    self.assertIn('ARCHIVE', lines[0])
+                    peak = next(line for line in lines if '2026-11-02' in line)
+                    self.assertIn('11.00 MB', peak)
+                    self.assertIn('▲ 峰值', peak)
+                    self.assertIn('—', next(line for line in lines if '2026-11-03' in line))
+                    self.assertIn('▸ 进行中', next(line for line in lines if '2026-11-04' in line))
+                    self.assertIn('18.00 MB', next(line for line in lines if line.startswith('│ 合计')))
+                    self.assertIn('6.00 MB', next(line for line in lines if line.startswith('│ 平均')))
+        finished = ANSI.sub('', Dashboard(80).traffic_table('en0', 'UTC', '天', rows, current_period=400))
+        self.assertNotIn('进行中', finished)
+        overlap = Dashboard(80).traffic_table('en0', 'UTC', '天', rows, current_period=100)
+        current_line = next(line for line in overlap.splitlines() if '2026-11-02' in line)
+        self.assertIn('▲ 峰值 ▸ 进行中', current_line)
+        single = ANSI.sub('', Dashboard(80).traffic_table('en0', 'UTC', '天', rows[:1], current_period=400))
+        self.assertNotIn('平均', single)
+        empty = ANSI.sub('', Dashboard(80).traffic_table('en0', 'UTC', '天', [])).splitlines()
+        self.assertIn('暂无采样数据', empty[2])
+        self.assertTrue(empty[-1].startswith('└'))
+
+    def test_live_and_history_screens_carry_their_mode_tag(self):
+        summary = storage.Summary()
+        summary.add_sample(10, 1, 1000, 2000)
+        report = Report('en0', None, 0, 10, summary)
+        display = Dashboard(100)
+        history = display.render(report, None, rows=30).splitlines()
+        self.assertIn('◆ ARCHIVE', history[0])
+        live = display.render(report, None, LiveSample((1, 2, 3)), rows=30).splitlines()
+        self.assertRegex(live[0], r'[●○] LIVE 实时')
+        capture = SimpleNamespace(interface='en0', status='', ready=True, rows=[], local_rows=[])
+        connections = Connections(2, interface='en0'), ()
+        for screen in (display.ip_screen(capture, 20, 0), display.connection_screen(connections, 20, 0)):
+            self.assertRegex(screen.splitlines()[0], r'^● LIVE ╺━ ')
+        # Both modes share the download accent, while the frame lines stay the same.
+        color = Dashboard(100, color=True, truecolor=True, theme='dark')
+        self.assertIn(color.colors['down'] + 'm┏━', color.render(report, None, rows=30).splitlines()[0])
+        self.assertIn(color.colors['down'] + 'm┏━',
+                      color.render(report, None, LiveSample((1, 2, 3)), rows=30).splitlines()[0])
+
 
 class LiveUpdateTests(unittest.TestCase):
     def test_six_local_ips_fit_on_one_page_and_keep_stable_positions(self):
@@ -492,10 +546,12 @@ class LiveUpdateTests(unittest.TestCase):
         report = Report('en0', None, 0, 10, summary)
         sampler = LiveSampler('en0')
         size = os.terminal_size((120, 30))
+        # The header corner carries the download accent in both modes.
+        # Each tuple lists the light, dark and undetected themes.
         modes = (
             ({'COLORTERM': 'truecolor'}, ('38;2;0;87;117', '1;38;2;79;248;238', '38;2;0;135;140')),
             ({'TERM': 'xterm-256color'}, ('38;5;24', '1;36', '38;5;30')),
-            ({'TERM': 'xterm'}, ('1;36', '1;36', '1;36')),
+            ({'TERM': 'xterm'}, ('1;36',) * 3),
         )
         for env, foregrounds in modes:
             for live in (None, sampler):
@@ -511,11 +567,14 @@ class LiveUpdateTests(unittest.TestCase):
                         styles = re.sub(r'38;(?:2;\d+;\d+;\d+|5;\d+)', '39', body)
                         self.assertNotRegex(styles, r'\x1b\[(?:[0-9]+;)*(?:7|4[0-8]|10[0-7])(?:;|m)')
                         self.assertIn('\033[{}m┏━'.format(foreground), screen)
+                        header = ANSI.sub('', screen.splitlines()[0])
+                        self.assertIn(' NETWORK MONITOR ', header)
+                        self.assertIn('LIVE 等待采样' if live else 'ARCHIVE 历史统计', header)
                         if env.get('TERM') == 'xterm':
                             self.assertIn('\033[1;35m┏━', screen)
                             self.assertIn('\033[1;33m┏━', screen)
                         if theme != 'dark':
-                            self.assertIn('\033[1;39m NETWORK MONITOR \033[0m', screen)
+                            self.assertIn('\033[1;39mITOR \033[0m', screen)
         with patch.dict(os.environ, {'NO_COLOR': '1', 'COLORTERM': 'truecolor'}, clear=True):
             screen = dashboard_text(options, 'en0', None, (0, 10), True, sampler, size,
                                     query=lambda *_: report)
