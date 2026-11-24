@@ -1,0 +1,43 @@
+name: 发布已验收的 Release
+
+on:
+  push:
+    branches: [publish/v0.3.5]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: "45322439328"
+      RELEASE_TAG: v0.3.5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v0.3.5
+          persist-credentials: false
+      - name: 验证已通过的发布构建
+        run: |
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .head_sha)" = "$(git rev-parse HEAD)"
+          test "$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" --jq .conclusion)" = success
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.BUILD_RUN }}
+          path: assets
+          merge-multiple: true
+      - name: 校验草稿附件并发布
+        run: |
+          python3 scripts/release.py formula --assets assets --output formula
+          test "$(wc -l < formula/SHA256SUMS)" -eq 4
+          gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft | grep -Fx true
+          gh release download "$RELEASE_TAG" --dir draft-assets
+          cmp formula/SHA256SUMS draft-assets/SHA256SUMS
+          cmp formula/network-monitor.rb draft-assets/network-monitor.rb
+          (cd draft-assets && sha256sum -c SHA256SUMS)
+          gh release edit "$RELEASE_TAG" --draft=false --latest
