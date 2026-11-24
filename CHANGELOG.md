@@ -1,5 +1,9 @@
 # 更新日志
 
+## [0.3.5](https://github.com/Verdient/network-monitor/releases/tag/v0.3.5) - 2026-11-24
+
+- 修复 `stats --day` 的历史趋势图横轴。按所选时区显示当天零点到次日零点，无采样的时段留空，支持夏令时切换日。
+
 ## [0.3.4](https://github.com/Verdient/network-monitor/releases/tag/v0.3.4) - 2026-11-23
 
 - IP 页优先使用本地 DB-IP City Lite 和 ASN Lite 数据，每天检查一次更新。更新失败时，仅当构建和下载时间均超过 90 天才视为过期。

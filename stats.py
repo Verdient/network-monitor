@@ -357,8 +357,9 @@ def read_report(database, interface, zone, start, end, columns, sampler=None):
             summary.add_sample(*sample)
         chart = None
         if columns and ((summary.count and start < end) or (sampler is not None and start <= end)):
+            fixed_range = sampler is not None or time_ranges.is_day_range(start, end, zone)
             chart = storage.chart_series(connection, tables, start, history_end, summary, columns,
-                                         live_samples, chart_end=end if sampler else None)
+                                         live_samples, chart_end=end if fixed_range else None)
     return Report(interface, zone, start, end, summary, chart)
 
 

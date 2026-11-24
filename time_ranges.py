@@ -118,6 +118,12 @@ def day_range(value, zone):
     return start, end
 
 
+def is_day_range(start, end, zone):
+    start_day = local_datetime(start, zone).date()
+    end_day = local_datetime(end, zone).date()
+    return end_day > start_day and (start, end) == resolve_range(zone=zone, now=start)
+
+
 def period_start(timestamp, unit, zone):
     local = local_datetime(timestamp, zone)
     if unit in ('day', 'month'):

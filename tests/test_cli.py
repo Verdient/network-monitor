@@ -175,6 +175,8 @@ class CommandTests(unittest.TestCase):
 
     def test_day_matches_explicit_boundaries_in_the_selected_zone(self):
         self.samples()
+        self.env['COLUMNS'] = '100'
+        self.env['LINES'] = '30'
         options = ('stats', '--database', 'samples.db', '-i', 'eth0', '--tz', 'Asia/Shanghai')
         explicit = self.invoke(*options, '--start', '2026-11-19', '--end', '2026-11-20')
         for option in ('-d', '--day'):
@@ -182,8 +184,31 @@ class CommandTests(unittest.TestCase):
                 day = self.invoke(*options, option, '2026-11-19')
                 self.assertEqual(day.returncode, 0, day.stderr)
                 self.assertEqual(day.stdout, explicit.stdout)
+                self.assertIn('时间范围：11-19 00:00:00 → 11-20 00:00:00', day.stdout)
+        dashboard = self.invoke(*options, '--day', '2026-11-19', '--dashboard')
+        self.assertEqual(dashboard.returncode, 0, dashboard.stderr)
+        axis = next(line for line in dashboard.stdout.splitlines() if '11-19 00:00' in line)
+        self.assertIn('11-20 00:00', axis)
         for extra in (('--day', '2026-02-30'), ('--day', '2026-11-19', '--last', '1d')):
             self.assertEqual(self.invoke(*options, *extra).returncode, 2)
+
+    def test_day_chart_uses_calendar_boundaries_on_dst_transitions(self):
+        zone = ZoneInfo('America/New_York')
+        writer = storage.Writer(self.cwd / 'samples.db')
+        try:
+            for month, day in ((3, 8), (11, 1)):
+                for offset, hour in ((0, 12), (1, 0)):
+                    stamp = int(dt.datetime(2026, month, day + offset, hour, tzinfo=zone).timestamp())
+                    writer.write(stamp, 1, {'eth0': (10, 20)})
+        finally:
+            writer.close()
+        for day, hours in (('2026-03-08', 23), ('2026-11-01', 25)):
+            with self.subTest(day=day):
+                result = self.invoke('stats', '--day', day, '--tz', str(zone), '--width', str(hours),
+                                     '--database', 'samples.db', '-i', 'eth0', '--plain')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('采样：1 次', result.stdout)
+                self.assertIn('每列约 3600.00 秒', result.stdout)
 
     def test_traffic_uses_requested_periods_counts_and_half_open_bounds(self):
         self.samples()
