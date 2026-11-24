@@ -1,0 +1,53 @@
+name: Verify public v0.3.5 packages
+
+on:
+  push:
+    branches: [verify/v0.3.5]
+
+permissions:
+  contents: read
+
+jobs:
+  apt:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            architecture: amd64
+          - os: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_ARCH: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Verify and install the signed public APT package
+        run: |
+          docker run --rm -e PACKAGE_ARCH -v "$PWD:/work:ro" debian:bullseye sh -ec '
+            export DEBIAN_FRONTEND=noninteractive
+            sh /work/scripts/debian11_sources.sh
+            apt-get update -qq
+            apt-get install -y --no-install-recommends ca-certificates curl gnupg
+            curl -fsSL --retry 3 https://verdient.github.io/network-monitor/signing-key.asc -o /usr/share/keyrings/network-monitor.asc
+            test "$(gpg --batch --with-colons --show-keys /usr/share/keyrings/network-monitor.asc | awk -F: "/^fpr:/ {print \$10; exit}")" = "$(cat /work/packaging/apt/signing-key.fingerprint)"
+            printf "%s\n" "deb [signed-by=/usr/share/keyrings/network-monitor.asc] https://verdient.github.io/network-monitor stable main" > /etc/apt/sources.list.d/network-monitor.list
+            apt-get update --error-on=any
+            test "$(apt-cache policy network-monitor | awk "/Candidate:/ {print \$2}")" = 0.3.5-1
+            test "$(dpkg --print-architecture)" = "$PACKAGE_ARCH"
+            curl -fsSL --retry 3 https://github.com/Verdient/network-monitor/releases/download/v0.3.5/SHA256SUMS -o /tmp/release-checksums
+            cd /tmp
+            apt-get download network-monitor=0.3.5-1
+            PACKAGE="network-monitor_0.3.5-1_$PACKAGE_ARCH.deb"
+            awk -v name="$PACKAGE" "\$2 == name" /tmp/release-checksums | sha256sum -c -
+            test "$(dpkg-deb -f "$PACKAGE" Architecture)" = "$PACKAGE_ARCH"
+            apt-get install -y --no-install-recommends network-monitor=0.3.5-1
+            test "$(network-monitor -v)" = "network-monitor 0.3.5"
+            for path in /usr/share/bash-completion/completions/network-monitor /usr/share/zsh/vendor-completions/_network_monitor /usr/share/fish/vendor_completions.d/network-monitor.fish; do
+              test -s "$path"
+            done
+            runuser -u network-monitor -- network-monitor monitor -i lo --count 1
+            runuser -u nobody -- network-monitor stats -i lo --no-chart | grep "采样：1 次"
+          '
